@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Allocate a dev-server port for a pipeline worktree (.claude/worktrees/*).
+#
+# Usage: bin/worktree-port                      # print the lowest free port (no side effects)
+#        bin/worktree-port --assign <path/.env> # allocate, write/replace PORT=<n> in that .env, print n
+#
+# A port is "free" when no .claude/worktrees/*/.env claims it (PORT=<n>) and nothing is
+# listening on it. Range 3010–3099; ports are never reused while claimed. On exhaustion
+# exits 1 with a message pointing at /worktree-sweep.
+set -euo pipefail
+
+MAIN_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+WT_ROOT="$MAIN_DIR/.claude/worktrees"
+RANGE_START=3010
+RANGE_END=3099
+
+ENV_FILE=""
+if [ "${1:-}" = "--assign" ]; then
+  ENV_FILE="${2:-}"
+  if [ -z "$ENV_FILE" ]; then
+    echo "Usage: bin/worktree-port [--assign <path/to/.env>]" >&2
+    exit 2
+  fi
+  [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
+  ENV_FILE="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+elif [ -n "${1:-}" ]; then
+  echo "Usage: bin/worktree-port [--assign <path/to/.env>]" >&2
+  exit 2
+fi
+
+# Ports claimed by other pipeline worktrees' .env files (the target .env itself is excluded).
+claimed() {
+  local f
+  for f in "$WT_ROOT"/*/.env; do
+    [ -f "$f" ] || continue
+    [ "$f" = "$ENV_FILE" ] && continue
+    grep -hs '^PORT=' "$f" | cut -d= -f2 | tr -d '"'"'"' '
+  done
+}
+
+listening() {
+  [ -n "$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null)" ]
+}
+
+find_free() {
+  local claims p
+  claims="$(claimed || true)"
+  for ((p = RANGE_START; p <= RANGE_END; p++)); do
+    if grep -qx "$p" <<<"$claims"; then continue; fi
+    if listening "$p"; then continue; fi
+    echo "$p"
+    return 0
+  done
+  echo "No free port in ${RANGE_START}–${RANGE_END} for pipeline worktrees — run /worktree-sweep to remove merged/closed worktrees" >&2
+  return 1
+}
+
+write_port() {
+  sed -i '' '/^PORT=/d' "$ENV_FILE"
+  [ -s "$ENV_FILE" ] && [ -n "$(tail -c1 "$ENV_FILE")" ] && echo >> "$ENV_FILE"
+  echo "PORT=$1" >> "$ENV_FILE"
+}
+
+port="$(find_free)"
+
+if [ -z "$ENV_FILE" ]; then
+  echo "$port"
+  exit 0
+fi
+
+write_port "$port"
+# Re-scan: if another worktree raced us to the same port, pick the next free one once.
+if grep -qx "$port" <<<"$(claimed || true)"; then
+  port="$(find_free)"
+  write_port "$port"
+fi
+echo "$port"

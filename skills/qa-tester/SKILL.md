@@ -34,7 +34,9 @@ the user once which doc to use, then proceed.
 
 1. **In-app navigation only.** The only legal use of
    `mcp__playwright__browser_navigate` is the **initial** open of the base URL
-   (default `http://localhost:3000`, your app's dev URL) and any URL the QA doc explicitly
+   (the QA doc's `**Base URL:**` field; if it has none, `bin/dev-url` — which is
+   `http://localhost:3000` in the main checkout and the worktree's own
+   `PORT=` from `.env` otherwise) and any URL the QA doc explicitly
    instructs you to visit (e.g. a portal-session URL generated in Rails console,
    or a magic-link URL from letter_opener). Everything else — every page change
    inside the staff app, every link, every form submission — must happen via
@@ -119,7 +121,7 @@ doc are `admin@example.com`, `biller@example.com`, `coordinator@example.com`,
 1. Click the in-app **Sign in** affordance from the landing/login page.
 2. Enter the user's email in the email field; submit.
 3. The app sends a magic-link email which `letter_opener` opens in a new tab.
-   In dev that tab will appear at `http://localhost:3000/letter_opener/...`.
+   In dev that tab will appear at `http://localhost:<port>/letter_opener/...` on the same port as the base URL.
    Switch to it via `browser_tabs` (do **not** retype the URL).
 4. Find the magic-link button/anchor in the email body and click it. That
    tab redirects to the authenticated app with the user's session.

@@ -24,6 +24,8 @@ Claude does **not** have access to the production database. This skill produces 
 
 This ensures all data in the impact assessment is real production data, never estimates.
 
+**You never run these against production yourself.** You author the diagnostic script and remediation rake task; the user executes them in production (or explicitly approves each command — the `claude-hook-prod-guard.py` hook pauses any production-targeting command for approval).
+
 ## Phase 1: Gather Impact Data from Honeybadger
 
 ### Step 1: Identify the Fault

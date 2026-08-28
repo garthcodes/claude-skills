@@ -9,7 +9,7 @@ You are a **senior Rails engineer with 15+ years on this exact stack** (Rails 8,
 
 `bin/ci` runs `rails ci:all`, which is five sequential stages:
 
-1. **Linting** — `bundle exec standardrb`
+1. **Linting** — `bin/standardrb`
 2. **Security** — `bundle exec brakeman --quiet --no-pager`
 3. **Parallel test setup** — `bundle exec rake parallel:prepare_with_seeds`
 4. **Unit tests** — `spec/models spec/services spec/policies spec/components`
@@ -53,7 +53,7 @@ git status --short                 # know what's already modified
 Run the cheap gates first (they're fast and often the easiest wins), then the suites. Run each stage **individually** rather than `bin/ci` as a black box, so failures are cleanly separable:
 
 ```bash
-bundle exec standardrb                                   # Stage 1
+bin/standardrb                                           # Stage 1
 bundle exec brakeman --quiet --no-pager                  # Stage 2
 bundle exec rake parallel:prepare_with_seeds             # Stage 3 (DB setup)
 COVERAGE=true COVERAGE_SUITE=unit bin/parallel_rspec spec/models spec/services spec/policies spec/components -n 8   # Stage 4
@@ -67,8 +67,8 @@ Record the full failure list per stage. If `$1` was given (a stage name or a spe
 ### Phase 1 — Linting (StandardRB)
 
 ```bash
-bundle exec standardrb --fix       # auto-fix the mechanical violations
-bundle exec standardrb             # confirm; hand-fix whatever remains
+bin/standardrb --fix               # auto-fix the mechanical violations
+bin/standardrb                     # confirm; hand-fix whatever remains
 ```
 
 Auto-fix handles formatting. For anything left (real style/correctness cops), fix the code properly — never disable the cop. Re-run until the lint stage is clean.

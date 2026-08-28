@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Print the base URL of this checkout's dev server.
+#
+# Usage: bin/dev-url            # http://localhost:<port>
+#
+# Set DEV_URL_HOST / DEV_URL_SCHEME (e.g. in .env or your shell) if your dev server
+# is reached at a custom host such as https://myapp.localhost.
+#
+# Port precedence matches bin/dev: $PORT > PORT= in .env > 3000. Pipeline
+# worktrees under .claude/worktrees/ get their PORT= from bin/worktree-port,
+# so Playwright-driving skills can resolve the right server without knowing
+# whether they are running in the main checkout or a worktree.
+set -euo pipefail
+
+port="${PORT:-}"
+if [ -z "$port" ] && [ -f .env ]; then
+  # `|| true`: grep exits 1 when .env has no PORT= line (the main checkout), and
+  # `set -e`/`pipefail` would otherwise abort before we fall back to 3000.
+  port="$( { grep -hs '^PORT=' .env || true; } | tail -1 | cut -d= -f2 | tr -d "\"' ")"
+fi
+
+echo "${DEV_URL_SCHEME:-http}://${DEV_URL_HOST:-localhost}:${port:-3000}"

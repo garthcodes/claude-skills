@@ -44,16 +44,36 @@ If `$ARGUMENTS` is empty, scope testing to **only the changes on the current git
 
 ## Prerequisites Check
 
+### Step 0: Resolve the Base URL
+
+**Do this first — before any Bash or Playwright call.** This checkout may be the main
+repo (the default port) or a `/build-feature` worktree with its own server and its own database
+(`PORT=` in `.env`, assigned by `bin/worktree-port` in the 3010–3099 range). Hunting the
+wrong port means hunting the wrong branch.
+
+```bash
+BASE_URL="$(bin/dev-url)"   # $PORT > PORT= in .env > 3000
+echo "$BASE_URL"
+```
+
+**Override**: if `$ARGUMENTS` contains a line of the form `Base URL: <url>` (for example,
+when this skill is invoked by `/bug-hunt-all`), use exactly that URL instead and skip
+`bin/dev-url`. That line is scope metadata, not part of the feature description — strip it
+before using the rest of `$ARGUMENTS` as the feature scope.
+
+Use `$BASE_URL` for every server check, every `browser_navigate`, and the
+`**Base URL:**` field of the report. Never hardcode 3000.
+
 ### Step 1: Ensure Development Server is Running
 
 First, check if the Rails server is running:
 
 ```bash
-curl -sk -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "not running"
+curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL" 2>/dev/null || echo "not running"
 ```
 
 If the server is not running (response is not 200 or "not running"):
-1. Start the development server in the background using `bin/dev`
+1. Start the development server in the background using `bin/dev` (it reads `PORT=` from `.env`, so it comes up on `$BASE_URL`)
 2. Wait for it to be ready (check with curl until you get a 200 response)
 3. Note: You may need to wait 10-15 seconds for the server to fully start
 
@@ -73,9 +93,9 @@ Use tools like:
 
 ## Application Configuration
 
-**Base URL:** `http://localhost:3000` (substitute your app's dev URL)
+**Base URL:** `$BASE_URL` — resolved in Step 0 via `bin/dev-url`
 **Organization:** Default tenant (multi-tenant app uses subdomains)
-**Port:** 3000
+**Port:** 3000 in the main checkout; the worktree's own `PORT=` from `.env` otherwise
 
 ### Viewport Strategy
 
@@ -104,7 +124,7 @@ For the Client Portal, also test at tablet (768x1024) and desktop (1280x800) as 
 ### Step 3: Navigate to the Feature (Like a Real User)
 
 **CRITICAL: Navigate by clicking through the UI, not by entering URLs directly.** You are simulating a real user who clicks links and buttons to get around the application. Direct URL navigation should only be used for:
-- The initial page load (`http://localhost:3000`)
+- The initial page load (`$BASE_URL`)
 - Following the magic link for authentication
 
 After authentication, you will land on a dashboard/home page. From there, **use the UI** (sidebar links, navigation menus, buttons, breadcrumbs) to reach the feature you need to test.
@@ -131,14 +151,14 @@ This application uses **passwordless authentication** with magic links (Devise-P
 | Standard User | `user@example.com` |
 
 #### Authentication Flow:
-1. Navigate to `http://localhost:3000` - you'll be redirected to the sign-in page
+1. Navigate to `$BASE_URL` - you'll be redirected to the sign-in page
 2. Use `mcp__playwright__browser_snapshot` to see the login form
 3. Enter a test email (e.g., `admin@example.com`) using `mcp__playwright__browser_type`
 4. Click "Send Magic Link" button
 5. **Get the magic link from Rails server logs:**
    - Use Bash to read recent log output: `tail -100 log/development.log | grep -A5 "magic_link"`
    - Or check the terminal where `bin/dev` is running
-   - The magic link URL will look like: `http://localhost:3000/passwordless/magic_links/...`
+   - The magic link URL will look like: `$BASE_URL/passwordless/magic_links/...` (if the logged link shows a different port than `$BASE_URL`, rewrite the port before navigating)
 6. Navigate to the magic link URL using `mcp__playwright__browser_navigate`
 7. You should now be authenticated and redirected to the dashboard
 
@@ -347,7 +367,7 @@ Create `docs/bug-reports/{session}/INDEX.md`:
 **Date:** [Date/Time]
 **Tester:** Claude Code (Automated)
 **Feature:** [Feature Description]
-**Base URL:** http://localhost:3000
+**Base URL:** [the $BASE_URL used for this run]
 
 ---
 
@@ -418,13 +438,14 @@ Create `docs/bug-reports/{session}/INDEX.md`:
 ## Starting the Hunt
 
 Begin by:
+1. **Resolving `BASE_URL`** with `bin/dev-url` (Step 0) — do not assume 3000
 1. **Determining scope** — check `$ARGUMENTS`. If non-empty, use Mode A (feature description). If empty, use Mode B (run `git diff` against `main` and scope strictly to changed files).
 2. Checking if the server is running (start with `bin/dev` if not)
 3. Understanding the feature from the codebase (routes, controllers, views) — in Mode B, restrict reads to files in the diff
 4. **Determining the target viewport** (Staff/Admin = desktop, Client Portal = mobile-first)
 5. Creating the session directory: `docs/bug-reports/{feature-or-branch-name}-{timestamp}/`
 6. **Setting the appropriate viewport size** before navigating
-7. Navigating to `http://localhost:3000` and authenticating
+7. Navigating to `$BASE_URL` and authenticating
 8. **Clicking through the UI** (sidebar, nav menus, buttons) to reach the feature - do NOT type URLs directly
 9. Systematically testing each component by interacting as a user would
 10. Creating individual bug reports as you find issues (don't wait!)

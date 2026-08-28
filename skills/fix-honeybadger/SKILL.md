@@ -83,7 +83,7 @@ After fetching the fault details, create an isolated git worktree so the main wo
 - `MAIN_DIR` = the absolute path of the main repo checkout (the directory this skill is run from)
 - `BRANCH_NAME` = `fix/honeybadger-<fault_id>-<short-description>` (kebab-case, derived from the error)
 - `WORKTREE_DIR` = `../<repo-name>-hb-<fault_id>` (sibling directory)
-- `WORKTREE_PORT` = `3002` (dev server port for Playwright verification)
+- `WORKTREE_PORT` = assigned by `bin/worktree-port --assign` in Step 3 (3010–3099); `BASE_URL` = `http://localhost:${WORKTREE_PORT}` (via `bin/dev-url`)
 
 ```bash
 # Create the worktree with its own branch off main
@@ -93,6 +93,13 @@ git worktree add "$WORKTREE_DIR" -b "$BRANCH_NAME" main
 # Copy gitignored files needed for development (skip certs if your dev setup doesn't use local HTTPS)
 cp -r "$MAIN_DIR/config/certs" "$WORKTREE_DIR/config/"
 cp "$MAIN_DIR/.env" "$WORKTREE_DIR/.env"
+
+# Claim a free dev-server port for this worktree (writes PORT= into its .env).
+# Never hardcode a port — concurrent worktrees would collide on it.
+cd "$WORKTREE_DIR"
+WORKTREE_PORT="$(bin/worktree-port --assign .env)"
+BASE_URL="$(bin/dev-url)"
+echo "Worktree server will be ${BASE_URL}"
 ```
 
 **CRITICAL: From this point forward, ALL file reads, edits, searches, tests, linting, and git operations MUST use absolute paths based on `$WORKTREE_DIR`.** For example:
@@ -212,12 +219,8 @@ If only P1/P0 issues remain, proceed (these are optional improvements).
 Start a development server from the worktree on a separate port so Playwright can verify the fix.
 
 ```bash
-# Create a Procfile with port 3002 for the worktree server
-# (replace 3000 with whatever port your Procfile.dev normally uses)
-cd $WORKTREE_DIR && sed 's/3000/3002/g' Procfile.dev > Procfile.dev.worktree
-
-# Start the worktree dev server in the background
-cd $WORKTREE_DIR && PORT=3002 foreman start -f Procfile.dev.worktree &
+# bin/dev reads PORT= from .env (set in Step 3), so no Procfile rewrite is needed.
+cd $WORKTREE_DIR && bin/dev &
 WORKTREE_SERVER_PID=$!
 ```
 
@@ -226,9 +229,9 @@ Wait for the server to be ready:
 ```bash
 # Poll until the server responds (max 30 seconds)
 for i in $(seq 1 30); do
-  STATUS=$(curl -sk -o /dev/null -w "%{http_code}" http://localhost:3002 2>/dev/null)
+  STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL" 2>/dev/null)
   if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
-    echo "Worktree dev server ready on port 3002"
+    echo "Worktree dev server ready at ${BASE_URL}"
     break
   fi
   sleep 1
@@ -249,7 +252,7 @@ Determine the appropriate test user based on the fault context:
 - Default to `admin@example.com` for broadest access
 
 #### Authentication Flow:
-1. Navigate to `http://localhost:3002`
+1. Navigate to `$BASE_URL`
 2. Use `mcp__playwright__browser_snapshot` to see the login form
 3. Enter the test email using `mcp__playwright__browser_type`
 4. Click "Send Magic Link"
@@ -257,7 +260,7 @@ Determine the appropriate test user based on the fault context:
    ```bash
    tail -100 $WORKTREE_DIR/log/development.log | grep -A5 "magic_link"
    ```
-6. Navigate to the magic link URL (ensure it uses port 3002)
+6. Navigate to the magic link URL (ensure it uses `$WORKTREE_PORT`, rewriting the port if the logged link differs)
 7. Confirm authentication succeeded with `mcp__playwright__browser_snapshot`
 
 ### Step 14: Set Viewport
@@ -308,11 +311,9 @@ mcp__playwright__browser_close
 # Stop the worktree dev server
 kill $WORKTREE_SERVER_PID 2>/dev/null
 
-# Also kill any remaining foreman/ruby processes on port 3002
-lsof -ti:3002 | xargs kill -9 2>/dev/null
+# Also kill any remaining foreman/ruby processes on the worktree port
+lsof -ti:$WORKTREE_PORT | xargs kill -9 2>/dev/null
 
-# Remove the temporary Procfile
-rm -f $WORKTREE_DIR/Procfile.dev.worktree
 ```
 
 Delete any screenshots created during verification (in `.playwright-mcp/` or elsewhere).

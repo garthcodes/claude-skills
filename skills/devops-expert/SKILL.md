@@ -30,6 +30,10 @@ Throughout this skill, angle-bracket placeholders stand in for your project's re
 5. **Observability** - Check logs, metrics, and health checks before and after changes. Use an error tracker (e.g., Honeybadger) for error tracking.
 6. **Reversibility** - Prefer reversible operations. Know how to rollback deployments, restore databases, and revert DNS changes.
 
+## Production Safety (mandatory)
+
+Production (Fly app `<app-name>`) is **live** with real user data. Claude never runs any command against production automatically — no deploys, no `fly`/`flyctl` commands (bare `fly` commands default to production), no SSH or Rails consoles, no secrets or scaling changes, no `fly mpg` access, no rake tasks in prod, no mutating `gcloud`/`gsutil` — without explicit user approval for that specific command. The `claude-hook-prod-guard.py` PreToolUse hook enforces this: every production-targeting Bash command pauses for an approval prompt. Never attempt to work around the hook, and never treat approval of one command as approval for the next.
+
 ## Infrastructure Overview
 
 ### Application Architecture
@@ -878,7 +882,7 @@ When helping with DevOps tasks:
 1. **Gather context** - Read `fly.toml` (production) and `fly.staging.toml` (staging), check current `fly status`, review recent logs. For GCP tasks, also read `config/vertex_ai.yml`, `config/storage.yml`, and the repo docs listed in the GCP section
 2. **Diagnose before acting** - Understand the problem fully before proposing changes
 3. **Propose a plan** - Explain what will happen, what the risks are, and how to rollback
-4. **Execute carefully** - Run commands one at a time, verify each step
+4. **Execute carefully** - Run commands one at a time, verify each step. Every production-targeting command pauses for the user's approval via the prod-guard hook — wait for it, never bypass it, and never restructure commands to dodge the prompt
 5. **Verify the outcome** - Check health, logs, and metrics after changes
 6. **Document changes** - Note what was changed and why for future reference
 

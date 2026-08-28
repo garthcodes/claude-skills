@@ -77,7 +77,7 @@ Path: `<session-dir>/MASTER_INDEX.md`. Use this template — keep section lines 
 
 **Date started:** YYYY-MM-DD HH:MM
 **Source:** docs/APP_FEATURES.md
-**Base URL:** http://localhost:3000
+**Base URL:** [the $BASE_URL used for this sweep]
 
 This sweep runs `/bug-hunt` against each top-level section of `docs/APP_FEATURES.md`. Each section gets its own subdirectory with its own `INDEX.md` and `BUG-*.md` files. Open any section's `INDEX.md` to feed it to `/fix-bug-index`.
 
@@ -132,11 +132,16 @@ Print a one-paragraph plan to the user: total sections, count to hunt, count ski
 
 Do these once, before the loop — `/bug-hunt` re-checks them, but doing them up front lets you fail fast and gives the child something to share.
 
-### Step 7: Dev server
+### Step 7: Base URL and dev server
+This checkout may be the main repo (default port) or a `/build-feature` worktree with its own
+server and database (`PORT=` in `.env`). Resolve the URL first, then check the server —
+and pass `$BASE_URL` down to each `/bug-hunt` child so the whole sweep stays on one app.
+
 ```bash
-curl -sk -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "not running"
+BASE_URL="$(bin/dev-url)"   # $PORT > PORT= in .env > 3000
+curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL" 2>/dev/null || echo "not running"
 ```
-If not 200, start `bin/dev` in the background and wait until the curl returns 200 (10–15s typical).
+If not 200, start `bin/dev` in the background (it reads `PORT=` from `.env`) and wait until the curl returns 200 (10–15s typical).
 
 ### Step 8: Browser
 Resize for staff/admin (most sections):
@@ -146,7 +151,7 @@ mcp__playwright__browser_resize(width: 1280, height: 800)
 Client Portal sections (13, parts of 11.4) require mobile (375x667). `/bug-hunt` will resize as needed per its viewport strategy — you do not need to switch ahead of time.
 
 ### Step 9: Authenticate once
-Navigate to `http://localhost:3000` (your app's dev URL), request a magic link for `admin@example.com` (full access covers nearly all sections), pull the link from `tail -100 log/development.log | grep -A5 "magic_link"`, and navigate to it. Verify you land on the dashboard.
+Navigate to `$BASE_URL`, request a magic link for `admin@example.com` (full access covers nearly all sections), pull the link from `tail -100 log/development.log | grep -A5 "magic_link"`, and navigate to it. Verify you land on the dashboard.
 
 Most sections work as admin. Two exceptions where the child should switch user:
 - **13. Client Portal** — needs a client-side session. The child can re-auth via portal verification token from the dev logs.
@@ -160,19 +165,20 @@ Most sections work as admin. Two exceptions where the child should switch user:
 
 1. Pick the first task with status `pending`. Mark it `in_progress` via TaskUpdate.
 
-2. Build the `$ARGUMENTS` for `/bug-hunt`. This MUST include the `Output dir:` override so the child writes into the master session dir instead of a fresh timestamped sibling:
+2. Build the `$ARGUMENTS` for `/bug-hunt`. This MUST include the `Output dir:` override so the child writes into the master session dir instead of a fresh timestamped sibling, and the `Base URL:` override so the child hunts the same server this sweep resolved in Step 7:
 
    ```
    Section NN: <Title>
 
    Output dir: docs/bug-reports/full-app-sweep-<TS>/<NN>-<slug>/
+   Base URL: <the $BASE_URL resolved in Step 7>
 
    Features in this section (from docs/APP_FEATURES.md):
 
    <verbatim body of the section: ### subsections and bullet lists>
    ```
 
-   Pass that block as the argument to the Skill tool when invoking `/bug-hunt`. The child skill is patched to honor `Output dir:` — confirm it actually wrote into the expected subdir after it returns.
+   Pass that block as the argument to the Skill tool when invoking `/bug-hunt`. The child skill honors both `Output dir:` and `Base URL:` — confirm it wrote into the expected subdir after it returns.
 
 3. When `/bug-hunt` returns:
    a. Read `<session-dir>/<NN>-<slug>/INDEX.md` if it exists (the child only creates it if it found at least one bug). If it does not exist, treat the section as **zero bugs found**.

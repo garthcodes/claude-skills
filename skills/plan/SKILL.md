@@ -174,7 +174,9 @@ prior steps. This section becomes /tickets' input — make each step atomic.]
 [Only real ones, with mitigations. No boilerplate.]
 
 ## Success Criteria
-[Copied/adapted from the PRD's acceptance criteria and Definition of Done. Every FR maps to
+[Copied/adapted from the PRD's acceptance criteria and Definition of Done. When the PRD has an
+Acceptance Criteria table, list its rows by ID (`AC-1: …`) verbatim and name the plan step(s)
+that satisfy each — those IDs are what `/verify-acceptance` gates the PR on. Every FR maps to
 at least one criterion. Each criterion is observable (a test passes or a browser shows it).]
 
 ## Decisions Made

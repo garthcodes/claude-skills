@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Remove pipeline worktrees (.claude/worktrees/*) whose PR is merged or closed.
+#
+# Usage: bin/worktree-sweep            # act
+#        bin/worktree-sweep --dry-run  # print the same one-line verdicts, change nothing
+#
+# For each worktree it stops the dev server on the worktree's PORT (kills whatever listens on
+# that port — it is reserved to the worktree via .env), drops the <app>_development/<app>_test
+# databases matching its DATABASE_SUFFIX (including parallel_rspec numbered ones), and runs
+# `git worktree remove` (never --force). Open-PR, no-PR, dirty, and unregistered worktrees are
+# never touched. Branches are never deleted. Sibling ../<app>-* worktrees are never considered.
+# Requires an authenticated `gh`; otherwise it says so and exits 0 without changes.
+#
+# Exit status: 0, or 1 if any "error —" line was printed.
+set -uo pipefail
+
+# Database name prefix from config/database.yml (e.g. "myapp" for myapp_development).
+# Override with APP_DB_PREFIX=... if auto-detection doesn't fit your database.yml.
+APP_DB_PREFIX="${APP_DB_PREFIX:-$(sed -n 's/^ *database: *\([a-z0-9_]*\)_development.*/\1/p' "$(git rev-parse --show-toplevel)/config/database.yml" | head -1)}"
+if [ -z "$APP_DB_PREFIX" ]; then
+  echo "Could not detect the database name prefix from config/database.yml — set APP_DB_PREFIX" >&2
+  exit 2
+fi
+
+DRY_RUN=0
+case "${1:-}" in
+  --dry-run) DRY_RUN=1 ;;
+  "") ;;
+  *) echo "Usage: bin/worktree-sweep [--dry-run]" >&2; exit 2 ;;
+esac
+
+MAIN_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+WT_ROOT="$MAIN_DIR/.claude/worktrees"
+HAD_ERROR=0
+
+if ! gh auth status >/dev/null 2>&1; then
+  echo "Sweep skipped: GitHub CLI is not authenticated (gh auth status failed) — nothing was changed"
+  exit 0
+fi
+
+shopt -s nullglob
+dirs=("$WT_ROOT"/*/)
+shopt -u nullglob
+if [ ${#dirs[@]} -eq 0 ]; then
+  echo "No pipeline worktrees in .claude/worktrees/"
+  exit 0
+fi
+
+REGISTERED="$(git -C "$MAIN_DIR" worktree list --porcelain | awk '/^worktree /{sub(/^worktree /,""); print}')"
+
+# Sets globals: name registered branch port suffix pr_state pr_number dirty
+inspect_worktree() {
+  local d="${1%/}"
+  name="$(basename "$d")"
+  registered=0
+  grep -qxF "$d" <<<"$REGISTERED" && registered=1
+  branch="$(git -C "$d" branch --show-current 2>/dev/null || true)"
+  port="$(grep -s '^PORT=' "$d/.env" | tail -1 | cut -d= -f2 | tr -d '"'"'"' ' || true)"
+  suffix="$(grep -s '^DATABASE_SUFFIX=' "$d/.env" | tail -1 | cut -d= -f2 | tr -d '"'"'"' ' || true)"
+  dirty=0
+  [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ] && dirty=1
+  pr_state="none"
+  pr_number=""
+  if [ $registered -eq 1 ] && [ -n "$branch" ]; then
+    local rows
+    rows="$(cd "$MAIN_DIR" && gh pr list --head "$branch" --state all --json number,state \
+      --jq 'if length == 0 then empty else ((map(select(.state=="OPEN")) + .) | .[0] | "\(.state) \(.number)") end' 2>/dev/null || true)"
+    if [ -n "$rows" ]; then
+      pr_state="$(cut -d' ' -f1 <<<"$rows" | tr 'A-Z' 'a-z')"
+      pr_number="$(cut -d' ' -f2 <<<"$rows")"
+    fi
+  fi
+}
+
+stop_server() {
+  [ -n "$port" ] || return 0
+  local pids i
+  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  [ -n "$pids" ] || return 0
+  kill $pids 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+    [ -z "$pids" ] && return 0
+    sleep 1
+  done
+  kill -9 $pids 2>/dev/null || true
+  return 0
+}
+
+# Returns the list of DBs that could not be dropped (empty on success).
+drop_databases() {
+  [ -n "$suffix" ] || return 0
+  local dbs db remaining=""
+  dbs="$(psql -Atc "SELECT datname FROM pg_database WHERE datname ~ '^${APP_DB_PREFIX}_(development|test)${suffix}[0-9]*$'" postgres 2>/dev/null || true)"
+  for db in $dbs; do
+    if ! dropdb --if-exists "$db" >/dev/null 2>&1; then
+      psql -Atc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db'" postgres >/dev/null 2>&1
+      dropdb --if-exists "$db" >/dev/null 2>&1 || remaining="$remaining $db"
+    fi
+  done
+  echo "${remaining# }"
+}
+
+for d in "${dirs[@]}"; do
+  d="${d%/}"
+  inspect_worktree "$d"
+
+  if [ $registered -eq 0 ]; then
+    echo "$name: kept (not a git worktree)"; continue
+  fi
+  if [ -z "$branch" ] || [ "$pr_state" = "none" ]; then
+    echo "$name: kept (no PR)"; continue
+  fi
+  if [ "$pr_state" = "open" ]; then
+    echo "$name: kept (open PR #$pr_number)"; continue
+  fi
+  if [ $dirty -eq 1 ]; then
+    echo "$name: skipped — dirty (PR #$pr_number $pr_state)"; continue
+  fi
+  if [ $DRY_RUN -eq 1 ]; then
+    echo "$name: would remove (PR #$pr_number $pr_state)"; continue
+  fi
+
+  stop_server
+  failed_dbs="$(drop_databases)"
+  if [ -n "$failed_dbs" ]; then
+    echo "$name: error — could not drop $failed_dbs; worktree kept (its .env is needed to retry)"
+    HAD_ERROR=1; continue
+  fi
+  if ! err="$(git -C "$MAIN_DIR" worktree remove "$d" 2>&1)"; then
+    echo "$name: error — git worktree remove failed: $err"
+    HAD_ERROR=1; continue
+  fi
+  echo "$name: removed (PR #$pr_number $pr_state)"
+done
+
+exit $HAD_ERROR

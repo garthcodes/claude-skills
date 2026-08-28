@@ -70,14 +70,24 @@ When implementing:
 
 ## Phase 4: Verification with Playwright
 
-### Step 7: Prerequisites Check
+### Step 7: Resolve the Base URL
+This checkout may be the main repo (default port) or a `/build-feature` worktree with its own
+server and database (`PORT=` in `.env`). Resolve it before touching the browser:
+
+```bash
+BASE_URL="$(bin/dev-url)"   # $PORT > PORT= in .env > 3000
+```
+
+Use `$BASE_URL` for the server check and every `browser_navigate`. Never hardcode the port.
+
+### Step 7b: Prerequisites Check
 Ensure the development server is running:
 
 ```bash
-curl -sk -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "not running"
+curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL" 2>/dev/null || echo "not running"
 ```
 
-If not running, start it with `bin/dev` and wait for it to be ready.
+If not running, start it with `bin/dev` (it reads `PORT=` from `.env`) and wait for it to be ready.
 
 ### Step 8: Authenticate
 Use passwordless authentication:
@@ -91,7 +101,7 @@ Use passwordless authentication:
 | Standard User | `user@example.com` |
 
 #### Authentication Flow:
-1. Navigate to `http://localhost:3000` (your app's dev URL)
+1. Navigate to `$BASE_URL`
 2. Use `mcp__playwright__browser_snapshot` to see the login form
 3. Enter the appropriate test email
 4. Click "Send Magic Link"

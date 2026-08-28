@@ -65,13 +65,18 @@ On any transient sub-agent failure (timeout, MCP error, browser crash, child ski
 
 Run these checks in order. Auto-fix what is safe. The user invoked this skill knowing it would QA the whole app, so destructive setup on the local DB is consented.
 
-### Step 0.1: Dev server
+### Step 0.1: Base URL and dev server
+
+This checkout may be the main repo (default port) or a `/build-feature` worktree with its own
+server and database (`PORT=` in `.env`). Resolve the URL first — everything downstream,
+including the sub-agent prompts, uses `$BASE_URL`.
 
 ```bash
-curl -sk -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "not running"
+BASE_URL="$(bin/dev-url)"   # $PORT > PORT= in .env > 3000
+curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL" 2>/dev/null || echo "not running"
 ```
 
-If not 200: start `bin/dev` in the background and wait until curl returns 200 (10–15s typical). If after 60s the server is still unreachable, stop with a clear message: "Dev server failed to start. Run `bin/dev` in another terminal, then re-invoke."
+If not 200: start `bin/dev` in the background (it reads `PORT=` from `.env`) and wait until curl returns 200 (10–15s typical). If after 60s the server is still unreachable, stop with a clear message: "Dev server failed to start. Run `bin/dev` in another terminal, then re-invoke."
 
 ### Step 0.2: `STAGING_MAGIC_LINK` is `true`
 
@@ -181,7 +186,7 @@ Path: `<session-dir>/MASTER_INDEX.md`. Template:
 
 **Date started:** YYYY-MM-DD HH:MM
 **Source:** docs/APP_FEATURES.md (+ routes.rb drift cross-check)
-**Base URL:** http://localhost:3000
+**Base URL:** [the $BASE_URL resolved in Step 0.1]
 **In-scope roles:** admin, therapist, supervisor, clinical_supervisor, coordinator, client
 
 This sweep generates role-aware QA plans for each top-level section of `docs/APP_FEATURES.md`, executes them, and aggregates findings. Each section gets its own subdirectory with `INDEX.md` and `BUG-*.md` files. Open any section's `INDEX.md` to feed it to `/fix-bug-index`.
@@ -267,7 +272,7 @@ This is the **preferred auth path** — it bypasses the magic-link email and is 
 Auth flow for any staff user:
 
 ```
-1. mcp__playwright__browser_navigate to http://localhost:3000/devise/passwordless/users/sign_in
+1. mcp__playwright__browser_navigate to $BASE_URL/devise/passwordless/users/sign_in
 2. Find the email input (label "Email") and fill with the role's seeded email
 3. Click submit ("Send Magic Link" button)
 4. Wait for the amber flash box ("Staging Login" header) to appear
@@ -287,7 +292,7 @@ If at any step the "Sign in now" link does NOT appear after submit, fall back to
 
 ```
 1. bin/rails runner 'puts FormAssignment.with_valid_token.first&.access_token'  # capture token
-2. Navigate to http://localhost:3000/client-portal/<token>
+2. Navigate to $BASE_URL/client-portal/<token>
 3. Look up the seeded client's DOB:
    bin/rails runner 'c = Client.joins(:emails).find_by(emails: {email: "testclient@example.com"}); puts c.date_of_birth.strftime("%m/%d/%Y") if c'
 4. Fill the birth_date field (verification[birth_date]) with the formatted DOB
@@ -383,12 +388,12 @@ CONTEXT:
 - Role under test: [role] (seeded email: [seeded-email-for-role])
 - Master session dir: docs/bug-reports/full-app-qa-[TS]/
 - Per-feature subdir: docs/bug-reports/full-app-qa-[TS]/[NN]-[slug]/
-- Dev server is running at http://localhost:3000 and STAGING_MAGIC_LINK=true so the dev-shortcut "Sign in now" button is available after submitting the email form.
+- Dev server is running at [the $BASE_URL from Step 0.1 — substitute the literal URL here] and STAGING_MAGIC_LINK=true so the dev-shortcut "Sign in now" button is available after submitting the email form.
 
 YOUR JOB (end-to-end):
 1. If a different user is currently authenticated in the browser, log out via /users/sign_out.
 2. Log in as the seeded user for this role using the dev-shortcut flow:
-   - Navigate to http://localhost:3000/passwordless/users/sign_in
+   - Navigate to [BASE_URL]/passwordless/users/sign_in
    - Fill the Email textbox with [seeded-email-for-role]
    - Click "Send Magic Link"
    - When the amber "Staging Login" box appears, click "Sign in now"

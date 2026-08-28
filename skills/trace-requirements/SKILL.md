@@ -29,6 +29,10 @@ Extract from the PRD:
   tables under `## Functional Requirements` (grouped under `###` category headings; IDs are
   `FR-1`, `FR-2`, … Priority is `Must` or `Should`)
 - **Definition of Done** — the checkbox list under `## Definition of Done`
+- **Acceptance Criteria** — the `| ID | Criterion | FR | Priority | Verified by |` table
+  under `## Acceptance Criteria` (rows `AC-1`, …) — the user-agreed contract. Older PRDs
+  don't have it; then report its trace as `N/A — PRD has no Acceptance Criteria table` under
+  Ambiguities and don't let its absence affect the verdict.
 - **Out of Scope** — the bullets under `### Out of Scope — Do NOT Build`
 - **Edge Cases & Policies** — the decided-behavior table (used as supporting evidence targets)
 
@@ -60,7 +64,8 @@ mailers, specs).
 
 ## Phase 3: Trace Each Requirement
 
-For **every FR** and **every Definition of Done checkbox**, in order:
+For **every FR**, **every Acceptance Criteria row**, and **every Definition of Done checkbox**,
+in order:
 
 1. Locate candidate evidence in the diff: the files, methods, routes, components, and specs
    that would satisfy it.
@@ -119,7 +124,7 @@ if it doesn't exist):
 is MISSING. Otherwise GAPS FOUND. If the PRD has no DoD section, the verdict rests on the
 FRs alone.]
 
-**FRs implemented**: X/Y (Must: X/Y, Should: X/Y) • **Definition of Done**: X/Y
+**FRs implemented**: X/Y (Must: X/Y, Should: X/Y) • **Acceptance Criteria (static)**: X/Y • **Definition of Done**: X/Y
 
 ---
 
@@ -133,6 +138,15 @@ FRs alone.]
 | FR-3 | Should | MISSING | — | No evidence in diff |
 
 ---
+
+## Acceptance Criteria Trace (static)
+
+| AC | Priority | Verified by | Status | Evidence | Notes |
+|----|----------|-------------|--------|----------|-------|
+| AC-1 | Must | browser | IMPLEMENTED | `app/...`, `spec/...` | |
+
+[Static only: "code + spec that would satisfy this exists". Whether it was *observed* to hold
+is `/verify-acceptance`'s job, later in the pipeline. `N/A` if the PRD has no AC table.]
 
 ## Definition of Done Trace
 

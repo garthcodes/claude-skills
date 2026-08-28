@@ -1,6 +1,6 @@
 # claude-skills
 
-A working library of 51 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications — planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that compose all of them into end-to-end pipelines.
+A working library of 58 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications — planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that compose all of them into end-to-end pipelines.
 
 This is my real, day-to-day setup (genericized for sharing — app names, hosts, and infra identifiers replaced with placeholders). It's shared so you can see how I work and borrow whatever is useful.
 
@@ -21,7 +21,8 @@ The core idea: **small, single-purpose skills composed by orchestrators.** Leaf 
 ```
 /build-feature  (the master pipeline)
 │
-├── /prd ──────────────── product requirements, question-driven
+├── bin/worktree-sweep ── remove worktrees whose PR is merged/closed (tooling/)
+├── /prd ──────────────── product requirements + agreed Acceptance Criteria table
 ├── /plan ─────────────── implementation plan from codebase exploration
 │     ├── /architect-review ── critique the plan
 │     ├── /frontend-review ─── verify front-end requirements are planned
@@ -33,7 +34,12 @@ The core idea: **small, single-purpose skills composed by orchestrators.** Leaf 
 │     ├── /scale-review ── architecture at launch scale
 │     ├── /review-fixes ── findings → prioritized fix tickets
 │     └── /code ────────── apply the fixes
+├── /security-review ──── branch diff (Claude Code built-in)
+├── /trace-requirements ─ every PRD requirement maps to code/spec evidence
+├── /plan-system-tests → /system-test-expert → /fix-system-test
 ├── /create-qa-document → /execute-qa ── browser QA via Playwright
+├── /verify-acceptance ── AC scorecard → PR / draft PR / no PR (the acceptance gate)
+├── /simplify ─────────── diff-scoped cleanup (Claude Code built-in)
 └── bin/ci ────────────── full local CI as the final gate
 ```
 
@@ -41,7 +47,7 @@ The other orchestrators follow the same pattern:
 
 | Orchestrator | Pipeline |
 |---|---|
-| `/build-feature` | PRD → plan → reviews → tickets → code → review → QA → green CI. The whole feature lifecycle in one command. |
+| `/build-feature` | PRD → plan → reviews → tickets → code → review → system tests → QA → acceptance gate → green CI → PR. Runs in a persistent, port-isolated worktree that stays up for review. The whole feature lifecycle in one command. |
 | `/build-feature-remote` | Kicks off `/build-feature` as a one-shot cloud routine for builds you don't want to babysit locally. |
 | `/full-review` | `/review` → `/scale-review` → `/review-fixes` → `/code` against a PR or the current branch. |
 | `/full-qa` | For every section of your feature catalog (`docs/APP_FEATURES.md`): `/create-qa-document` → `/execute-qa` with Playwright. Produces a resumable master bug index. Pure QA — never fixes. |
@@ -51,6 +57,8 @@ The other orchestrators follow the same pattern:
 | `/test-changed` | Detects changed models/services/policies/components/jobs on the branch, then fans out parallel test-generation agents (`/model-test`, `/service-test`, `/policy-test`, `/component-test`, test experts) — one per changed file category. |
 | `/green-ci` | Runs `bin/ci`, diagnoses every failure, and routes each to the right fixer: `/rspec-test-expert`, `/fix-system-test`, or `/debug`. Loops until green. Never commits. |
 | `/fix-honeybadger` | Pulls the latest production error, then `/plan` → reviews → `/code` → `/review-rails` → Playwright verification → PR. |
+| `/audit-fixer` | Walks a severity-ranked audit document and runs `/plan` → `/code` per finding until all are handled. Never commits. |
+| `/worktree-sweep` | Removes pipeline worktrees whose PR is merged or closed — stops their server, drops their databases. `/build-feature` runs it first. |
 
 **Why this works:** each stage runs in a fresh subagent context, so a 10-stage pipeline never blows the context window; every stage leaves an artifact on disk (PRD, plan, tickets, QA docs, bug indexes), so pipelines are resumable and auditable; and review stages are separate skills from build stages, so the critic isn't grading its own work.
 
@@ -67,6 +75,8 @@ The other orchestrators follow the same pattern:
 | `tickets` | Convert an implementation plan into discrete executable tickets |
 | `architect-guide` | Brainstorm with an experienced Rails architect / product thinker |
 | `improve` | Critique exploration/planning docs and suggest better solutions |
+| `product-question` | Answer a product question in plain language from the code alone — never docs |
+| `product-question-tldr` | `/product-question`, then boil it down to one ELI18 takeaway |
 
 ### Review
 | Skill | Purpose |
@@ -77,6 +87,8 @@ The other orchestrators follow the same pattern:
 | `review-fixes` | Turn review findings into a prioritized fix-ticket document |
 | `review-rails` | Review the current branch for quality, security, Rails 8 conventions |
 | `trace-requirements` | Map every PRD requirement to code/spec evidence in the branch diff |
+| `verify-acceptance` | Score every agreed PRD acceptance criterion against QA results and specs — the scorecard `/build-feature` gates the PR on |
+| `audit-fixer` | Orchestrator — see above |
 | `full-review` | Orchestrator — see above |
 
 ### Implementation experts
@@ -93,6 +105,8 @@ Deep reference skills that Claude loads when doing that kind of work:
 | `code` | Execute implementation plans efficiently using specialized agents |
 | `debug` | Structured debugging and error analysis |
 | `worktree` | Spin up a git worktree with its own databases and dev server port |
+| `worktree-sweep` | Orchestrator — see above |
+| `stedi-billing-expert` | Healthcare billing via the Stedi clearinghouse: eligibility (270/271), claims (837P), status (276/277), ERAs (835). Verifies against live Stedi docs |
 
 ### Testing
 | Skill | Purpose |
@@ -121,7 +135,8 @@ Deep reference skills that Claude loads when doing that kind of work:
 | `fix-honeybadger` | Latest production error → planned, reviewed, verified fix → PR |
 | `honeybadger-audit` | Audit a file for missing error-monitoring notifications |
 | `impact-assessment` | Scope a production bug's blast radius + generate a remediation task |
-| `user-docs` | Generate a user-facing handbook doc for a feature |
+| `user-docs` | Generate a user-facing handbook doc for a feature (also the corpus for an in-app help assistant) |
+| `sync-user-docs` | Sync the user-doc corpus with everything deployed to production since the last sync, and open a PR |
 
 ## Conventions these skills assume
 
@@ -131,9 +146,11 @@ These skills grew inside one Rails app, so they lean on a few conventions. Adapt
 - **`CLAUDE.md`** at the repo root — project conventions the skills defer to.
 - **`docs/APP_FEATURES.md`** — a sectioned catalog of your app's features. `/full-qa` and `/bug-hunt-all` iterate over its top-level sections.
 - **`bin/ci`** — one script that runs lint + security + tests locally. `/green-ci` and `/build-feature` treat it as the gate.
+- **`bin/dev-url`, `bin/worktree-port`, `bin/worktree-sweep`** — small helpers so the QA skills find the right dev server whether they run in the main checkout or a `/build-feature` worktree (each worktree gets its own `PORT=` and `DATABASE_SUFFIX` in `.env`). Shipped in [`tooling/`](tooling/).
+- **Production safety** — the ops skills never run a production-targeting command without explicit per-command approval. The `claude-hook-prod-guard.py` PreToolUse hook in [`tooling/`](tooling/) enforces that.
 - **`.claude/prds/`** — where `/prd` writes and `/plan` reads product requirement docs.
 - **Built-ins**: `/review`, `/security-review`, and `/simplify` are Claude Code built-in skills, referenced by the orchestrators but not part of this repo.
-- **Placeholders**: anything in `<angle-brackets>` (`<app-name>`, `<gcp-project>`) or at `example.com` is yours to fill in.
+- **Placeholders**: anything in `<angle-brackets>` (`<app-name>`, `<app-host>`, `<app>` for the database prefix, `<gcp-project>`, `<practice-name>`) or at `example.com` / `localhost:3000` is yours to fill in.
 
 ## License
 

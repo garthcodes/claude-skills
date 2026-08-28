@@ -139,6 +139,11 @@ After successful creation:
 - **Branch management**: Each worktree should have its own branch to avoid conflicts
 - **Cleanup**: Remember to remove worktrees when done to keep your workspace clean
 - **Claude Code compatibility**: Claude Code works seamlessly in worktrees
+- **Dev server port**: Sibling worktrees serve on the default port like the main checkout, which
+  collides with it. To run one alongside it, assign a port with
+  `bin/worktree-port --assign .env` (writes `PORT=<n>` in the 3010–3099 range; `bin/dev`
+  honors it, and `bin/dev-url` reports the resulting base URL for the QA/bug-hunt skills).
+  These `../<app>-*` worktrees are not managed by `/worktree-sweep`
 
 ## Example Usage
 

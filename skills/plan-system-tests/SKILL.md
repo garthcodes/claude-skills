@@ -31,9 +31,14 @@ Your plan must give them enough to do their jobs without re-deriving the feature
 If multiple inputs apply (e.g., branch + description), prefer branch (concrete code) and use the description to narrow scope.
 
 **PRD awareness:** If a PRD exists for the feature under `.claude/prds/` (matching the branch
-name, or referenced in commit messages), read it. Its **Definition of Done** items are the
-end-to-end journeys most worth covering here, and its **Edge Cases & Policies** table supplies
-edge-case scenarios with pre-decided expected behavior. Its "Out of Scope" list bounds yours.
+name, or referenced in commit messages), read it. Its **Acceptance Criteria** table (`AC-n`
+rows with a `Verified by` column) is the agreed contract the PR is gated on: the rows marked
+`browser` or `browser+spec` are the end-to-end journeys most worth covering here, and each
+scenario you write must name the ACs it proves (`Verifies:` line in the template). Aim to
+cover every **Must** browser AC — Playwright QA is the other browser-layer evidence, but a
+system spec is the one that keeps proving it after merge. If the PRD has no AC table, use its
+**Definition of Done** items instead. Its **Edge Cases & Policies** table supplies edge-case
+scenarios with pre-decided expected behavior. Its "Out of Scope" list bounds yours.
 
 **Pipeline note (`/build-feature`):** the pipeline invokes this skill with a blank argument
 after implementation and review fixes are committed, so branch mode sees the final code. The
@@ -88,6 +93,9 @@ Aim for the **minimum viable set** that catches real regressions. A good rule: o
 For each scenario, capture:
 
 - **ID** (`SC-001`, `SC-002`, …) so downstream skills can reference it.
+- **Verifies** — the PRD `AC-n` IDs this scenario proves (or `—`). `system-test-expert` must
+  put each ID in the example description (e.g. `it "hides Z codes from search (AC-1)"`) so
+  `/verify-acceptance` can find it by grep.
 - **Priority** — Critical / High / Medium. Critical = ship-blocker. Drop Low entirely; if it's Low, it doesn't belong here.
 - **Why this matters** — the specific regression this catches. Forces honest scoping; if you can't write this sentence, the scenario isn't worth running.
 - **User flow** — visit → act → assert, at the level a senior engineer can implement without re-reading the feature spec.
@@ -181,6 +189,7 @@ Use this template — keep prose short, drop sections that don't apply, do not i
 ### Critical
 
 **SC-001 — <Workflow name>**
+- **Verifies:** AC-1, AC-4 | —
 - **Why this matters:** <the specific regression this catches>
 - **User flow:**
   1. Sign in as <role>
@@ -236,6 +245,9 @@ Use this template — keep prose short, drop sections that don't apply, do not i
 ## Handoff Notes
 
 **For `system-test-expert`:**
+- Include every `Verifies:` AC ID in the corresponding example's description, e.g.
+  `it "rejects Z codes on the claim form (AC-3)"` — `/verify-acceptance` greps `spec/system`
+  for `AC-\d+` to credit the criterion. One example may cite several IDs.
 - <Anything unusual — e.g., "this feature requires the multi-session pattern from system-test-expert's docs">
 
 **For `fix-system-test`:**
@@ -253,6 +265,8 @@ Self-check before writing the file:
 - [ ] Every external integration is flagged for stubbing.
 - [ ] Total scenario count feels small for the feature, not generous. Under 10 for most features. If higher, justify it in the Confidence Strategy.
 - [ ] Authorization is covered by representative scenarios, not the full matrix.
+- [ ] Every scenario has a `Verifies:` line; every **Must** browser AC from the PRD is verified
+      by at least one scenario, or its omission is called out in the Output.
 - [ ] Viewport, tenant, and clock are specified once at top, not per-scenario.
 
 ## Output
@@ -260,6 +274,7 @@ Self-check before writing the file:
 When done:
 1. Announce the plan file path.
 2. One-line summary: `<N> scenarios across <M> workflows · target ~<T> min runtime · <K> external stubs needed`.
+   When a PRD AC table exists, add `· covers X/Y Must browser ACs` and list any uncovered IDs.
 3. Call out any **gaps you couldn't resolve from the code** (e.g., "couldn't tell whether reminders are sent synchronously or via job — implementer should confirm before writing SC-004").
 4. Do **not** start writing tests. That's `system-test-expert`'s job.
 

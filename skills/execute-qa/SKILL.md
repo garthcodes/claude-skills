@@ -26,8 +26,10 @@ Read the QA plan document and extract:
 
 **Read the `**Base URL:**` line from the QA plan's Test Environment section** — that is the
 `BASE_URL` for the entire run (server check, authentication, all navigation). Fall back to
-`http://localhost:3000` (your app's dev URL) only if the plan doesn't specify one. `/build-feature`
-runs QA against a worktree server on a different port — never assume the default.
+`bin/dev-url` only if the plan doesn't specify one (that resolves to
+`http://localhost:3000` in the main checkout and to the worktree's own `PORT=` from
+`.env` otherwise). `/build-feature` runs QA against a worktree server on a port assigned
+by `bin/worktree-port` in the 3010–3099 range — never assume the default.
 
 ```bash
 curl -sk -o /dev/null -w "%{http_code}" $BASE_URL 2>/dev/null || echo "not running"

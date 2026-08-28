@@ -2,6 +2,8 @@
 
 Placeholders: `<app-name>` = Fly.io production app, `<app-name>-staging` = staging app, `<fly-org>` / `<fly-org>-staging` = Fly.io orgs, `app.example.com` / `staging.example.com` = production / staging hosts.
 
+> **Production safety**: nearly every command on this sheet targets the live production app (`<app-name>`). None of them may run without explicit user approval — the `claude-hook-prod-guard.py` hook pauses each one for an approval prompt. Approval of one command is not approval of the next.
+
 ## Two Environments, Two Config Files
 
 Both environments run `RAILS_ENV=production`. The difference is the Fly.io config file:

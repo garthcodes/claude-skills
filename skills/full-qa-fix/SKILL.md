@@ -66,13 +66,18 @@ On any transient sub-agent failure (timeout, MCP error, browser crash, child ski
 
 The sub-agents drive Playwright to verify fixes (via `/bug-hunt-fix`), so the dev server must be up.
 
-### Step 0.1: Dev server
+### Step 0.1: Base URL and dev server
+
+This checkout may be the main repo (default port) or a `/build-feature` worktree with its own
+server and database (`PORT=` in `.env`). Resolve the URL first — everything downstream,
+including the sub-agent prompts, uses `$BASE_URL`.
 
 ```bash
-curl -sk -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "not running"
+BASE_URL="$(bin/dev-url)"   # $PORT > PORT= in .env > 3000
+curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL" 2>/dev/null || echo "not running"
 ```
 
-If not 200: start `bin/dev` in the background and wait until curl returns 200 (10–15s typical). If after 60s the server is still unreachable, stop with: "Dev server failed to start. Run `bin/dev` in another terminal, then re-invoke."
+If not 200: start `bin/dev` in the background (it reads `PORT=` from `.env`) and wait until curl returns 200 (10–15s typical). If after 60s the server is still unreachable, stop with: "Dev server failed to start. Run `bin/dev` in another terminal, then re-invoke."
 
 ### Step 0.2: `STAGING_MAGIC_LINK` is `true`
 
@@ -172,7 +177,7 @@ CONTEXT:
 - Section: [NN] — "[section title]"
 - Section bug index (absolute path): [absolute path to docs/bug-reports/full-app-qa-TS/NN-slug/INDEX.md]
 - This index lists [Total] bugs across severity buckets, plus any observations.
-- Dev server is running at http://localhost:3000 and STAGING_MAGIC_LINK=true, so the dev-shortcut "Sign in now" button is available after submitting the email on /passwordless/users/sign_in.
+- Dev server is running at [the $BASE_URL from Step 0.1 — substitute the literal URL here] and STAGING_MAGIC_LINK=true, so the dev-shortcut "Sign in now" button is available after submitting the email on /passwordless/users/sign_in.
 
 YOUR JOB (end-to-end):
 1. Invoke the /fix-bug-index skill via the Skill tool, passing the absolute path to this section's INDEX.md as the argument.

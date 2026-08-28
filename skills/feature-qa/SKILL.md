@@ -702,7 +702,7 @@ When invoked in regression mode, at the end of the run:
 
 1. **DO NOT FIX ANYTHING** — Your output is the session directory only.
 2. **DO NOT INVENT USERS** — Only sign in as the emails documented in Phase 1. If you need a role that isn't seeded, create the user via `flyctl ssh console` runner in the setup section and document it.
-3. **STAGING-ONLY** — Never run setup scripts against production. The Rails runner helper commands in this doc target the staging app (`-a your-app-staging`) explicitly. Never change that.
+3. **STAGING-ONLY** — Never run setup scripts against production. The Rails runner helper commands in this doc target the staging app (`-a your-app-staging`) explicitly. Never change that. The `claude-hook-prod-guard.py` hook intercepts any production-targeting command for user approval; staging-targeted commands pass untouched.
 4. **CONFIRM TENANT** — Any data-creation script must be wrapped in `ActsAsTenant.with_tenant(Organization.find_by(subdomain: "your-org"))`.
 5. **NAVIGATE LIKE A REAL USER** — Click links/buttons. Typing URLs is allowed only for the initial load and for the `flash[:staging_magic_link]` link (which is the "Sign in now" button you click anyway).
 6. **SIGN OUT BETWEEN ROLES** — Always sign out before switching users to avoid session leak.
