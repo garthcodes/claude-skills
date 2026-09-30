@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 ---
 name: viewcomponent-test-expert
 description: Expert at writing reliable, comprehensive RSpec tests for ViewComponents. Use when user asks to write component tests, fix component test failures, or improve component test coverage. Specializes in ViewComponent testing patterns with render_inline, Capybara matchers, slots, and accessibility testing.

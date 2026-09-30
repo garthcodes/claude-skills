@@ -143,12 +143,10 @@ This application uses **passwordless authentication** with magic links (Devise-P
 |------|-------|
 | Admin | `admin@example.com` |
 | Therapist | `therapist@example.com` |
-| Therapist 2 | `therapist2@example.com` |
-| Therapist 3 | `therapist3@example.com` |
 | Coordinator | `coordinator@example.com` |
-| Supervisor | `supervisor@example.com` |
+| Biller | `billing@example.com` |
+| Supervisor / clinical supervisor (co-signs for `therapist@example.com`) | `supervisor@example.com` |
 | Manager | `manager@example.com` |
-| Standard User | `user@example.com` |
 
 #### Authentication Flow:
 1. Navigate to `$BASE_URL` - you'll be redirected to the sign-in page

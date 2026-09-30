@@ -1,6 +1,6 @@
 ---
-description: Verify every PRD functional requirement is implemented in the branch diff — map each FR to code/spec evidence or flag it MISSING/PARTIAL
-argument-hint: [prd-path-or-blank]
+description: Verify every PRD functional requirement is implemented in the branch diff — map each FR (and each row of the acceptance-criteria contract, guards included) to code/spec evidence or flag it MISSING/PARTIAL
+argument-hint: [prd-or-contract-path-or-blank]
 ---
 
 # Requirements Traceability
@@ -14,33 +14,55 @@ This is the static gate between "the reviews liked the plan" and "QA exercised t
 it catches requirements that were dropped between plan and code, which neither plan review nor
 QA-scenario execution is guaranteed to notice.
 
-## Phase 1: Resolve the PRD
+## Phase 1: Resolve the PRD and the contract
 
-- If "${1}" is a path, read that PRD.
+"${1}" may be a PRD path or an acceptance-criteria contract path; the trace needs the PRD and
+uses the contract when one exists.
+
+- If "${1}" is a path under `.claude/acceptance-criteria/`, read that contract, follow its
+  `*PRD:*` link, and read that PRD.
+- If "${1}" is a PRD path, read it, then derive the slug (its `*Feature slug:*` header, else
+  the filename) and look for `.claude/acceptance-criteria/<slug>.md`.
 - If blank, resolve from the branch: `git branch --show-current`, strip the `feature/` prefix,
-  and look for `.claude/prds/<slug>.md`. If that misses, fall back to the newest PRD:
-  `ls -t .claude/prds/*.md 2>/dev/null | head -1` — but verify its
-  `*Feature slug: \`...\`*` header plausibly matches the branch before trusting it.
+  and look for `.claude/prds/<slug>.md` and `.claude/acceptance-criteria/<slug>.md`. If the
+  PRD misses, fall back to the newest PRD: `ls -t .claude/prds/*.md 2>/dev/null | head -1` —
+  but verify its `*Feature slug: \`...\`*` header plausibly matches the branch before
+  trusting it.
 - If no PRD can be found, **stop** and say so — a trace without a PRD is meaningless. Suggest
   `/prd` to create one.
+- If no contract file exists, continue: the `## Acceptance Criteria Trace (static)` section
+  reads `N/A — no contract file; run /acceptance-criteria`, and the verdict is unaffected.
 
 Extract from the PRD:
-- **Functional Requirements** — the `| ID | Requirement | Priority | Acceptance Criteria |`
+- **Functional Requirements** — the `| ID | Requirement | Priority | Observable outcome |`
   tables under `## Functional Requirements` (grouped under `###` category headings; IDs are
-  `FR-1`, `FR-2`, … Priority is `Must` or `Should`)
-- **Definition of Done** — the checkbox list under `## Definition of Done`
-- **Acceptance Criteria** — the `| ID | Criterion | FR | Priority | Verified by |` table
-  under `## Acceptance Criteria` (rows `AC-1`, …) — the user-agreed contract. Older PRDs
-  don't have it; then report its trace as `N/A — PRD has no Acceptance Criteria table` under
-  Ambiguities and don't let its absence affect the verdict.
-- **Out of Scope** — the bullets under `### Out of Scope — Do NOT Build`
-- **Edge Cases & Policies** — the decided-behavior table (used as supporting evidence targets)
+  `FR-1`, `FR-2`, … Priority is `Must` or `Should`; the *Observable outcome* is what the code
+  must plausibly produce)
+- **Definition of Done** — the checkbox list under `## Definition of Done` (lists the Must FRs)
+- **Out of Scope** — the numbered bullets (`OOS-1`, `OOS-2`, …) under
+  `### Out of Scope — Do NOT Build`
+- **Edge Cases & Policies** — the decided-behavior table (rows carry an `ID` column, `EC-1`,
+  `EC-2`, …; used as supporting evidence targets)
+
+Ignore any `## Acceptance Criteria` section embedded in a PRD — the contract file is the only
+source of ACs.
+
+Extract from the contract (when present):
+- **Acceptance Criteria** — the `## Contract` table
+  (`| ID | Type | Criterion | Source | Priority | Verified by |`, rows `AC-1`, …). Type is
+  `feature`, `permission`, `edge`, or `guard`; Source cites the PRD items (`FR-n`, `OOS-n`,
+  `EC-n`, `PERM-…`, `UX-…`, `DOD-n`) the row proves. Note the `*Review status:*` line — an
+  `UNREVIEWED` / `FAIL` contract is still traced, but say so under Ambiguities.
+- **Guard rows** (`Type = guard`) assert an observable *absence*; they are traced in Phase 3
+  as scope-drift checks, not as things to implement.
 
 **Tolerate PRD format drift** — older or hand-written PRDs deviate from the `/prd` template.
 Handle gracefully rather than failing:
 - FR IDs may be non-sequential or suffixed (`FR-7a`) — trace whatever IDs exist
-- The FR table may have a `Notes` column instead of `Acceptance Criteria` — then the
-  Requirement text itself is the criterion
+- The FR table's fourth column may be named `Acceptance Criteria` or `Notes` instead of
+  `Observable outcome` — read it the same way; if it is empty, the Requirement text itself is
+  the criterion
+- Out-of-Scope bullets or Edge Case rows without IDs — number them in order (`OOS-n`, `EC-n`)
 - The Out of Scope heading varies (`### Out of Scope (v1)` etc.) — match on "Out of Scope"
 - If there is **no Definition of Done section**, report its trace as `N/A — PRD has no
   Definition of Done` and note the non-conformance under Ambiguities; do NOT invent items
@@ -64,8 +86,8 @@ mailers, specs).
 
 ## Phase 3: Trace Each Requirement
 
-For **every FR**, **every Acceptance Criteria row**, and **every Definition of Done checkbox**,
-in order:
+For **every FR**, **every non-guard contract row** (`feature` / `permission` / `edge`), and
+**every Definition of Done checkbox**, in order:
 
 1. Locate candidate evidence in the diff: the files, methods, routes, components, and specs
    that would satisfy it.
@@ -95,6 +117,15 @@ Then check **scope drift**, in both directions:
   came from code review are normal — note them, don't inflate them into findings)
 - Anything that implements an item on the **Out of Scope — Do NOT Build** list — this is
   always a finding (the PRD treats gold-plating as a defect)
+- **Every guard AC** from the contract, as a static check: *does the diff introduce what this
+  guard forbids?* Read the guard's *Then* (the element text, route, column, job, or unchanged
+  behavior it says must be absent) and search the diff for it — a new route or link matching
+  the text, a migration adding the column, a job enqueue, a change to the behavior it
+  preserves. Record each guard as **HELD** (nothing in the diff introduces it) or **VIOLATED**
+  (cite the file/line). A violated guard is **always a finding** under Scope Drift, regardless
+  of whether the same item is also caught by the Out-of-Scope list above. Guards do not
+  appear in the AC trace table as IMPLEMENTED/PARTIAL/MISSING — held/violated is their whole
+  status here; whether the absence was *observed* is `/verify-acceptance`'s job.
 
 Exclude pipeline/working artifacts from drift analysis entirely: anything under
 `.claude/` (plans, tickets, reviews, bug-reports, prds), `docs/qa-plans/`,
@@ -109,6 +140,7 @@ if it doesn't exist):
 # Requirements Trace: [Feature Name]
 
 **PRD**: [path]
+**Contract**: [`.claude/acceptance-criteria/<slug>.md` — Review status: … | "none"]
 **Branch**: [branch] (base: main)
 **Analyzed**: [date] — [N] commits, [N] files changed
 
@@ -124,7 +156,7 @@ if it doesn't exist):
 is MISSING. Otherwise GAPS FOUND. If the PRD has no DoD section, the verdict rests on the
 FRs alone.]
 
-**FRs implemented**: X/Y (Must: X/Y, Should: X/Y) • **Acceptance Criteria (static)**: X/Y • **Definition of Done**: X/Y
+**FRs implemented**: X/Y (Must: X/Y, Should: X/Y) • **Acceptance Criteria (static)**: X/Y • **Guards held**: X/Y • **Definition of Done**: X/Y
 
 ---
 
@@ -141,12 +173,13 @@ FRs alone.]
 
 ## Acceptance Criteria Trace (static)
 
-| AC | Priority | Verified by | Status | Evidence | Notes |
-|----|----------|-------------|--------|----------|-------|
-| AC-1 | Must | browser | IMPLEMENTED | `app/...`, `spec/...` | |
+| AC | Type | Source | Priority | Verified by | Status | Evidence | Notes |
+|----|------|--------|----------|-------------|--------|----------|-------|
+| AC-1 | feature | FR-1 | Must | browser | IMPLEMENTED | `app/...`, `spec/...` | |
 
 [Static only: "code + spec that would satisfy this exists". Whether it was *observed* to hold
-is `/verify-acceptance`'s job, later in the pipeline. `N/A` if the PRD has no AC table.]
+is `/verify-acceptance`'s job, later in the pipeline. Guard rows are reported under Scope
+Drift, not here. `N/A — no contract file; run /acceptance-criteria` if there is no contract.]
 
 ## Definition of Done Trace
 
@@ -159,15 +192,17 @@ is `/verify-acceptance`'s job, later in the pipeline. `N/A` if the PRD has no AC
 ## Scope Drift
 
 - **Out-of-scope violations**: [changes implementing "Do NOT Build" items, or "None"]
+- **Guard ACs**: [one line per guard row — `AC-n (OOS-m): HELD` or `AC-n (OOS-m): VIOLATED — file:line introduces …`; or "N/A — no contract file"]
 - **Untraceable changes**: [diff work not mapping to any FR — one line each, or "None"]
 
 ---
 
 ## Gaps & Recommended Actions
 
-[One entry per PARTIAL/MISSING item, written like a ticket an implementer can execute without
-re-derivation: the FR, what exactly is absent, which files to create/modify, and which
-precedent in the diff/codebase to pattern-match. Must-priority gaps first.]
+[One entry per PARTIAL/MISSING item and per VIOLATED guard, written like a ticket an
+implementer can execute without re-derivation: the FR/AC, what exactly is absent (or, for a
+guard, what must be removed), which files to create/modify, and which precedent in the
+diff/codebase to pattern-match. Must-priority gaps first.]
 
 1. **FR-2 (Must, PARTIAL)**: Wire the `sort` param in `YController#index` into the query
    (see `XController#index` for the precedent); add a controller spec for both sort orders.
@@ -185,14 +220,15 @@ End your response with the verdict line, the X/Y counts, and the report path.
 
 ## Principles
 
-1. **Report-only.** Never edit application code, specs, or the PRD — even for a one-line gap.
-   The caller owns remediation.
+1. **Report-only.** Never edit application code, specs, the PRD, or the contract — even for
+   a one-line gap. The caller owns remediation.
 2. **Evidence over inference.** Every IMPLEMENTED status cites files you actually read. If you
    didn't read it, it isn't evidence.
 3. **Must gaps are the headline.** A MISSING Should is a note; a MISSING Must is the verdict.
-4. **The PRD is the whole scope.** Don't invent requirements the PRD doesn't state, and don't
-   grade code quality — `/full-review` owns that.
+4. **The PRD is the whole scope; the contract's guards are its fence.** Don't invent
+   requirements the PRD doesn't state, and don't grade code quality — `/full-review` owns
+   that.
 5. **Honest PARTIALs.** The value of this gate is in the precise "what's absent" — vague
    PARTIALs are unactionable and worse than either clean status.
 
-Begin by resolving the PRD.
+Begin by resolving the PRD and the contract.

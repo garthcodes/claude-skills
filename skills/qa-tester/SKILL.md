@@ -1,6 +1,6 @@
 ---
 description: Execute a single step from a QA plan document (Setup Step N or SC-XXX or EC-XXX) using Playwright MCP. Drives the browser the way a senior E2E engineer would — accessibility-first locators, web-first assertions, real wait conditions, never URL shortcuts. The user watches.
-argument-hint: <Setup Step N | SC-NNN | EC-NNN> [optional: path to QA doc]
+argument-hint: '<Setup Step N | SC-NNN | EC-NNN> [optional: path to QA doc]'
 ---
 
 # QA Tester (Playwright MCP)

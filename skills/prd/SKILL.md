@@ -12,7 +12,7 @@ If no feature idea was provided, ask for one before doing anything else.
 ## Why This PRD Matters
 
 The PRD you produce is the primary input to `/build-feature` — an **autonomous** pipeline
-(`/plan` → architect/frontend review → `/tickets` → `/code` → `/full-review` → Playwright QA → PR)
+(`/acceptance-criteria` → `/review-acceptance-criteria` → `/plan` → architect/frontend review → `/tickets` → `/code` → `/full-review` → Playwright QA → `/verify-acceptance` → PR)
 that runs end-to-end **without ever asking the user anything**. The full PRD text is pasted into
 the build agent's prompt.
 
@@ -20,12 +20,15 @@ This has three hard implications:
 
 1. **Every ambiguity in the PRD becomes an agent's silent guess.** This discovery conversation
    is the user's only chance to make decisions. Resolve everything or explicitly delegate it.
-2. **Acceptance criteria are the contract the PR is gated on.** The pipeline verifies them
-   through the browser twice — system tests (Capybara) and Playwright QA against a dev server
-   — and then runs `/verify-acceptance`, which scores every `AC-n` row. **A PR is not opened
-   until every Must-priority criterion is VERIFIED** (unmet Should criteria produce a draft
-   PR). So a criterion that is vague, wrong, or unverifiable doesn't get "interpreted" — it
-   blocks shipping. Criteria a browser or a spec can't check will never be checked.
+2. **The Acceptance Criteria contract is derived from this PRD mechanically.** `/build-feature`
+   first runs `/acceptance-criteria`, which turns every FR, edge case, permission cell, UX
+   state, and Out-of-Scope bullet into a Given/When/Then row, then `/review-acceptance-criteria`
+   audits that contract for gaps and inventions. The pipeline builds to that contract, checks
+   it at every phase, and finally runs `/verify-acceptance`: **a PR is not opened until every
+   Must-priority row is VERIFIED** (unmet Should rows produce a draft PR). So every requirement
+   you write must state an **observable outcome with concrete values** — a role, a route, a
+   visible text, a count. A requirement the browser or a spec can't witness will never be
+   checked, and an Out-of-Scope item you forget to list will never be guarded against.
 3. **The PRD must be self-contained and lean.** The whole document rides along in agent prompts
    through many pipeline phases. Comprehensive, but no filler.
 
@@ -110,8 +113,12 @@ another question would no longer change what gets built.
    behavior, what happens on deletion of related records. **Every edge case you raise must end
    in a decided behavior**, not a shrug.
 9. **Definition of done** — the user-visible outcomes that prove the feature works, phrased so
-   Playwright QA can verify them through the browser (these become the Acceptance Criteria
-   contract in Phase 3.5)
+   Playwright QA can verify them through the browser (`/acceptance-criteria` turns these, and
+   every FR, into the contract the PR is gated on)
+10. **Gap-finder** — ask once, near the end: *"Is there any outcome that — if it didn't work —
+   you would reject the PR, that we haven't discussed?"* and *"Is there anything an eager
+   engineer might add here that you specifically do NOT want?"* — the second answer feeds the
+   Out of Scope list, which becomes guard criteria.
 
 ### Question style
 
@@ -131,60 +138,6 @@ that you want to change?" Incorporate corrections, then proceed.
 
 ---
 
-## Phase 3.5: Draft and Agree the Acceptance Criteria
-
-The Acceptance Criteria table is the **contract** `/build-feature` gates the PR on. It must be
-explicitly agreed by the user — never inferred, never silently written. Do this after Phase 3
-and before writing any of the PRD.
-
-### Drafting rules
-
-Draft the full table from the decisions locked in during discovery:
-
-- **One row per user-visible outcome**, written as **Given / When / Then** with concrete data
-  ("Given the seeds are loaded, when a therapist searches `Z63` in the treatment-plan diagnosis
-  search, then 0 results are shown and searching `F43` still returns results" — not "Z codes
-  are hidden").
-- **IDs** `AC-1`, `AC-2`, … in reading order; stable once agreed (never renumber after sign-off —
-  drop rows leave gaps).
-- **FR** — every AC maps to ≥1 FR; every **Must** FR has ≥1 **Must** AC. If an FR has no AC, it
-  is either not really a requirement or the AC list is incomplete — fix one or the other.
-- **Priority** — `Must` (PR is blocked until verified) or `Should` (PR opens as draft if
-  unverified). Default to Must; a Should is a conscious downgrade the user makes.
-- **Verified by** — the cheapest layer that can *observe* the outcome:
-  - `browser` — Playwright QA scenario and/or Capybara system test (default for anything a user
-    sees or does)
-  - `spec` — model/service/controller/component/policy spec (server-side rules a browser can't
-    isolate, e.g. "a non-F code in the AI response is filtered before rendering")
-  - `browser+spec` — both required (typically validation that has a UI and a server rule)
-  - `manual` — only for things neither can reach (a rake task's dry-run output, a mailer's
-    rendered text). The criterion must then say **exactly** what command to run and what
-    output proves it.
-- **Negative and permission cases get their own rows** — "Given a `therapist`, when they visit
-  `/x` directly, then they see 403 / are redirected to …". Empty state, error state, and every
-  decided edge-case policy that a user can observe also gets a row.
-- **Nothing that is only verifiable by reading code.** "The service uses a Result object" is a
-  plan concern, not an AC.
-
-### Sign-off loop (AskUserQuestion)
-
-1. Present the **entire** draft table in chat as markdown — the user must be able to read it
-   whole, not in fragments.
-2. Then walk it with **AskUserQuestion**, one question per FR category (≤4 per round). Each
-   question offers: **"Approve as written (Recommended)"**, **"Edit — I'll say which rows"**,
-   **"Drop rows"**, **"Add missing criteria"**. Where you're unsure about priorities, add a
-   `multiSelect` question: "Which of these should block the PR (Must)?"
-3. Always include this gap-finder question once: *"Is there any outcome that — if it didn't
-   work — you would reject the PR, that isn't in this list?"*
-4. Apply the answers, re-present **only the changed/added rows**, and loop until every category
-   is approved. Cap at 3 rounds; if a row is still disputed after that, keep it as **Should**
-   and record the disagreement in Resolved Decisions.
-5. When every group is approved, the table is frozen. Stamp it `*Agreed with user: YYYY-MM-DD*`
-   directly under the heading in the PRD. **A PRD without this stamp is not ready for
-   `/build-feature`** — its Status line must say `Draft — acceptance criteria not agreed`.
-
----
-
 ## Phase 4: Write the PRD
 
 Write to `.claude/prds/[feature-slug].md` where the slug is the kebab-case feature name
@@ -200,7 +153,6 @@ wouldn't change what the build agent does.
 
 *Feature slug: `feature-slug`* (branch: `feature/feature-slug`)
 *Generated: [YYYY-MM-DD] • Status: Ready for /build-feature*
-[Status must be `Draft — acceptance criteria not agreed` until Phase 3.5 sign-off is complete.]
 
 ## Executive Summary
 [2–4 sentences: what it is, who it's for, the core value. /build-feature extracts this
@@ -231,9 +183,14 @@ head start; be specific.]
 1. [Numbered, concrete capabilities]
 
 ### Out of Scope — Do NOT Build
-- [Explicit exclusions. The build agent treats these as hard boundaries. Include things
-  that were discussed and deferred, plus adjacent features an eager agent might "helpfully"
-  add.]
+1. **OOS-1** — [Explicit exclusion, stated concretely enough that its *absence* can be
+   observed: "no bulk-export button on the clients index", "no email is sent on X".]
+2. **OOS-2** — …
+
+[Numbered `OOS-n`. The build agent treats these as hard boundaries and
+`/acceptance-criteria` writes one guard criterion per bullet — so name the surface the
+extra would have appeared on. Include things that were discussed and deferred, plus adjacent
+features an eager agent might "helpfully" add.]
 
 ### Future Considerations
 [Anticipated evolution — design-for-later notes only where they change v1 decisions]
@@ -241,12 +198,12 @@ head start; be specific.]
 ## Functional Requirements
 
 ### [Category]
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|---------------------|
-| FR-1 | [What the system must do] | Must / Should | AC-1, AC-3 |
+| ID | Requirement | Priority | Observable outcome |
+|----|-------------|----------|--------------------|
+| FR-1 | [What the system must do] | Must / Should | [How a browser, spec, or command would witness it — role, route, visible text/values] |
 
-[Every FR references ≥1 row of the Acceptance Criteria table below (the contract). A short
-inline phrase is fine too, but the AC IDs are what the pipeline traces.]
+[Every FR has an observable outcome; `/acceptance-criteria` turns each into ≥1 Given/When/Then
+row. If you can't write the outcome column, the requirement isn't specific enough yet.]
 
 ## User Experience
 
@@ -289,31 +246,17 @@ this section entirely if none apply.]
 
 ## Edge Cases & Policies
 
-| Scenario | Decided Behavior |
-|----------|------------------|
-| [edge case] | [the decision — never "TBD"] |
-
-## Acceptance Criteria
-*Agreed with user: YYYY-MM-DD*
-
-| ID | Criterion | FR | Priority | Verified by |
-|----|-----------|----|----------|-------------|
-| AC-1 | Given <precondition>, when <action>, then <observable result with concrete values> | FR-1 | Must | browser |
-| AC-2 | Given …, when …, then … | FR-2 | Must | spec |
-| AC-3 | Given a `therapist`, when they visit `/…` directly, then … | FR-2 | Must | browser |
-| AC-4 | Given …, when `bin/rails z:task DRY_RUN=1` is run, then it prints "Would delete N" and deletes nothing | FR-4 | Should | manual |
-
-[This table is the contract. `/build-feature` will not open a PR until every Must row is
-VERIFIED by `/verify-acceptance`; unverified Should rows make the PR a draft. Rows are frozen
-after sign-off — do not renumber. The per-FR "Acceptance Criteria" column above may simply
-reference the AC IDs (e.g. "AC-1, AC-3").]
+| ID | Scenario | Decided Behavior |
+|----|----------|------------------|
+| EC-1 | [edge case] | [the decision — never "TBD" — stated as what the user observes] |
 
 ## Definition of Done
-- [ ] AC-1: [criterion text, copied verbatim]
-- [ ] AC-2: …
+- [ ] FR-1: [the observable outcome, copied from the FR table]
+- [ ] FR-2: …
 
-[Derived from the table: one line per **Must** AC, in order. No new content here — it exists
-so humans (and `/plan-system-tests`, `/create-qa-document`) have a checklist view.]
+[One line per **Must** FR, in order. No new content here — it is the human checklist view;
+the machine-checked contract is generated from this PRD by `/acceptance-criteria` into
+`.claude/acceptance-criteria/[feature-slug].md`.]
 
 ## Resolved Decisions
 | Decision | Choice | Why |
@@ -329,9 +272,6 @@ E.g., "exact empty-state copy — keep tone consistent with existing screens".]
 the user now or move it — with explicit guardrails — into Implementer Discretion. An open
 question handed to an autonomous pipeline is a coin flip.
 
-**Write the Acceptance Criteria table exactly as agreed in Phase 3.5** — same IDs, same text,
-same priorities. Any change after sign-off requires going back to the user.
-
 ---
 
 ## Phase 5: Self-Review Gate
@@ -339,17 +279,20 @@ same priorities. Any change after sign-off requires going back to the user.
 Before presenting the PRD, re-read it **as if you were the build agent** receiving it cold:
 
 1. Is any FR ambiguous — could two reasonable engineers build different things from it?
-2. Is every AC row Given/When/Then with concrete values, a `Verified by` layer, and ≥1 FR?
-   Does every Must FR have a Must AC? Is any AC verifiable only by reading code (then it's
-   not an AC)? Does every `manual` row name the exact command and the proving output?
-3. Is the `*Agreed with user: <date>*` stamp present, and does the table match what the user
-   approved in Phase 3.5 word for word? Is the Definition of Done a faithful derivation?
+2. Does every FR have an *Observable outcome* a browser, a spec, or a quoted command could
+   witness — with concrete values? Could `/acceptance-criteria` write a Given/When/Then row
+   from it without guessing? Is anything in that column verifiable only by reading code?
+3. Is the Definition of Done exactly the Must FRs' outcomes, in order?
 4. Does any edge case lack a decided behavior? Any "TBD", "maybe", or "possibly" anywhere?
-5. Is the Out of Scope list explicit enough to stop an eager agent from gold-plating?
+5. Is every Out of Scope bullet numbered and concrete enough that its *absence* can be
+   observed (it becomes a guard criterion)? Does the list cover the extras an eager agent
+   would add?
 6. Does Existing System Context name real files/classes (not vague "the reminder system")?
-7. Is the permissions matrix complete for every FR action, and does each ❌ cell that matters
-   have a negative AC row?
+7. Is the permissions matrix complete for every FR action? (Each ❌ cell becomes a negative
+   criterion; each record-scoping note becomes a different-owner criterion.)
 
 Fix what fails. Then present to the user: the file path, a 3–5 bullet summary of what was
-decided, the AC count (Must/Should), and a note that it's ready for
-`/build-feature .claude/prds/[feature-slug].md`.
+decided, the FR count (Must/Should) and Out-of-Scope count, and the next step:
+`/build-feature .claude/prds/[feature-slug].md` (it derives and reviews the acceptance
+criteria itself), or `/acceptance-criteria .claude/prds/[feature-slug].md` followed by
+`/review-acceptance-criteria` to inspect the contract first.

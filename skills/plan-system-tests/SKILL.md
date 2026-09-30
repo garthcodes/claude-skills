@@ -30,15 +30,29 @@ Your plan must give them enough to do their jobs without re-deriving the feature
 
 If multiple inputs apply (e.g., branch + description), prefer branch (concrete code) and use the description to narrow scope.
 
-**PRD awareness:** If a PRD exists for the feature under `.claude/prds/` (matching the branch
-name, or referenced in commit messages), read it. Its **Acceptance Criteria** table (`AC-n`
-rows with a `Verified by` column) is the agreed contract the PR is gated on: the rows marked
-`browser` or `browser+spec` are the end-to-end journeys most worth covering here, and each
-scenario you write must name the ACs it proves (`Verifies:` line in the template). Aim to
-cover every **Must** browser AC — Playwright QA is the other browser-layer evidence, but a
-system spec is the one that keeps proving it after merge. If the PRD has no AC table, use its
-**Definition of Done** items instead. Its **Edge Cases & Policies** table supplies edge-case
-scenarios with pre-decided expected behavior. Its "Out of Scope" list bounds yours.
+**Acceptance-criteria awareness:** The AC source is the contract file. Resolve it:
+`git branch --show-current`, strip `feature/`, look for
+`.claude/acceptance-criteria/<slug>.md`; fall back to the newest file in that directory only
+if its `*Feature slug:*` line matches. Read the PRD it links (`*PRD:*` header) for context —
+its **Edge Cases & Policies** table supplies edge-case scenarios with pre-decided expected
+behavior — but the PRD carries no AC table; ignore any it happens to have. The contract's
+`## Contract` table (`| ID | Type | Criterion | Source | Priority | Verified by |`) is what
+the PR is gated on:
+
+- Rows marked `browser` or `browser+spec` with priority **Must** are the end-to-end journeys
+  to cover here; each scenario names the ACs it proves (`Verifies:` line in the template).
+  Playwright QA is the other browser-layer evidence, but a system spec is the one that keeps
+  proving it after merge.
+- **`guard` rows** assert an observable absence (something the PRD says must NOT be built).
+  Give each a negative assertion inside the nearest relevant scenario (e.g. the scenario that
+  already renders `/settings` asserts `expect(page).not_to have_link("Bulk export")`) and cite
+  the guard's `AC-n` on that scenario's `Verifies:` line; if no scenario naturally visits that
+  surface, give the guard its own small scenario.
+- The Out-of-Scope boundary is the set of guard ACs: do not plan scenarios that exercise
+  behavior a guard row says must be absent, other than to assert the absence.
+
+If no contract file exists, say so in the plan's Confidence Strategy, derive journeys from the
+code alone, and use `—` on every `Verifies:` line.
 
 **Pipeline note (`/build-feature`):** the pipeline invokes this skill with a blank argument
 after implementation and review fixes are committed, so branch mode sees the final code. The
@@ -93,9 +107,10 @@ Aim for the **minimum viable set** that catches real regressions. A good rule: o
 For each scenario, capture:
 
 - **ID** (`SC-001`, `SC-002`, …) so downstream skills can reference it.
-- **Verifies** — the PRD `AC-n` IDs this scenario proves (or `—`). `system-test-expert` must
-  put each ID in the example description (e.g. `it "hides Z codes from search (AC-1)"`) so
-  `/verify-acceptance` can find it by grep.
+- **Verifies** — the contract `AC-n` IDs this scenario proves (or `—`), guard IDs included
+  when the scenario asserts their absence. `system-test-expert` must put each ID in the
+  example description (e.g. `it "hides Z codes from search (AC-1)"`) so `/verify-acceptance`
+  can find it by grep.
 - **Priority** — Critical / High / Medium. Critical = ship-blocker. Drop Low entirely; if it's Low, it doesn't belong here.
 - **Why this matters** — the specific regression this catches. Forces honest scoping; if you can't write this sentence, the scenario isn't worth running.
 - **User flow** — visit → act → assert, at the level a senior engineer can implement without re-reading the feature spec.
@@ -265,8 +280,9 @@ Self-check before writing the file:
 - [ ] Every external integration is flagged for stubbing.
 - [ ] Total scenario count feels small for the feature, not generous. Under 10 for most features. If higher, justify it in the Confidence Strategy.
 - [ ] Authorization is covered by representative scenarios, not the full matrix.
-- [ ] Every scenario has a `Verifies:` line; every **Must** browser AC from the PRD is verified
-      by at least one scenario, or its omission is called out in the Output.
+- [ ] Every scenario has a `Verifies:` line; every **Must** browser AC from the contract is
+      verified by at least one scenario, or its omission is called out in the Output.
+- [ ] Every browser guard AC has a negative assertion somewhere (nearest scenario or its own).
 - [ ] Viewport, tenant, and clock are specified once at top, not per-scenario.
 
 ## Output
@@ -274,7 +290,8 @@ Self-check before writing the file:
 When done:
 1. Announce the plan file path.
 2. One-line summary: `<N> scenarios across <M> workflows · target ~<T> min runtime · <K> external stubs needed`.
-   When a PRD AC table exists, add `· covers X/Y Must browser ACs` and list any uncovered IDs.
+   When a contract exists, add `· covers X/Y Must browser ACs · Z guard ACs asserted` and
+   list any uncovered IDs.
 3. Call out any **gaps you couldn't resolve from the code** (e.g., "couldn't tell whether reminders are sent synchronously or via job — implementer should confirm before writing SC-004").
 4. Do **not** start writing tests. That's `system-test-expert`'s job.
 

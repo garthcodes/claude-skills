@@ -81,11 +81,13 @@ Create the worktree using the following approach:
      databases (run from inside the worktree directory):
    ```bash
    DB_SUFFIX="_$(echo "$1" | tr '-' '_' | tr -cd 'a-z0-9_' | cut -c1-30)"
-   echo "DATABASE_SUFFIX=${DB_SUFFIX}" >> ../<repo-name>-$1/.env
+   # printf's leading newline matters: .env may not end in one, and a glued-on line is ignored
+   printf '\nDATABASE_SUFFIX=%s\n' "$DB_SUFFIX" >> ../<repo-name>-$1/.env
 
    cd ../<repo-name>-$1
-   bin/rails db:prepare        # <app>_development${DB_SUFFIX} — creates, loads schema, seeds
-   bin/rails db:test:prepare   # <app>_test${DB_SUFFIX}
+   grep -E '^DATABASE_SUFFIX=' .env || { echo "DATABASE_SUFFIX not on its own line — fix .env" >&2; exit 1; }
+   bin/rails db:create db:schema:load   # <app>_development${DB_SUFFIX} + <app>_test${DB_SUFFIX}
+   bin/rails db:seed                    # use a small seed profile here if your app has one
    ```
    - Verify: `bin/rails runner 'puts ActiveRecord::Base.connection_db_config.database'` run in
      the worktree should print the suffixed name, NOT `<app>_development`
@@ -104,7 +106,7 @@ Handle common issues:
 - **Git errors**: Display clear error messages and suggested fixes
 - **SSL certs not found**: If `<main-repo>/config/certs` doesn't exist, warn the user they'll need to generate certificates with mkcert (or skip this step if the project doesn't use local HTTPS)
 - **.env not found**: If `<main-repo>/.env` doesn't exist, warn the user they'll need to create it with the required environment variables
-- **Database setup fails** (`db:prepare` errors): Try `bundle install` in the worktree and retry once. If it still fails, warn the user — do NOT remove the `DATABASE_SUFFIX` line from `.env` as a workaround; working against the shared `<app>_development` database is not acceptable
+- **Database setup fails** (`db:schema:load` / `db:seed` errors): Try `bundle install` in the worktree and retry once. If it still fails, warn the user — do NOT remove the `DATABASE_SUFFIX` line from `.env` as a workaround; working against the shared `<app>_development` database is not acceptable
 - **VSCode not found**: Provide instructions for opening the directory manually
 
 ## Success Confirmation
@@ -130,6 +132,9 @@ After successful creation:
 
 ## Important Notes
 
+- **PRD-only work**: to run `/prd` then `/build-feature`, use `/prd-worktree` instead — it skips
+  every step below except creating the worktree and opening VSCode, and `/build-feature` removes it
+  once a PR opens
 - **Worktree isolation**: Each worktree is independent with its own working directory
 - **Database isolation**: Each worktree gets its own `<app>_development_*` / `<app>_test_*`
   databases via `DATABASE_SUFFIX` in its `.env`. The main repo is unaffected (the var is unset
@@ -143,7 +148,7 @@ After successful creation:
   collides with it. To run one alongside it, assign a port with
   `bin/worktree-port --assign .env` (writes `PORT=<n>` in the 3010–3099 range; `bin/dev`
   honors it, and `bin/dev-url` reports the resulting base URL for the QA/bug-hunt skills).
-  These `../<app>-*` worktrees are not managed by `/worktree-sweep`
+  `/worktree-sweep` removes these `../<app>-*` worktrees too (along with every other worktree)
 
 ## Example Usage
 

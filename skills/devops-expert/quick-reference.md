@@ -44,7 +44,7 @@ fly scale count web=2 worker=1 --app <app-name>
 # Database
 fly mpg list --org <fly-org>
 fly mpg connect <cluster-id>
-fly mpg snapshot list <cluster-id>
+fly mpg backup list <cluster-id>
 
 # Domains
 fly certs list --app <app-name>
@@ -70,7 +70,7 @@ curl -I https://app.example.com/up
 ## Emergency Procedures
 
 **App down**: `fly status` > `fly logs` > `fly releases rollback`
-**Database issue**: `fly mpg status <id>` > `fly mpg snapshot list <id>` > restore
+**Database issue**: `fly mpg status <id>` > `fly mpg backup list <id>` > restore
 **Bad deploy**: `fly releases rollback --app <app-name>`
 **OOM**: Scale up VM memory in `fly.toml` > `fly deploy`
 **SSL broken**: `fly certs show <domain>` > check DNS > re-add cert if needed

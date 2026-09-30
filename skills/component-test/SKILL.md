@@ -1,3 +1,8 @@
+---
+name: component-test
+description: Generate RSpec tests for a ViewComponent following the application's component-test patterns
+---
+
 # ViewComponent Test Generator Command
 
 You are an expert Rails ViewComponent test developer. Write comprehensive, fast, and maintainable RSpec component tests for the application following established patterns and best practices.

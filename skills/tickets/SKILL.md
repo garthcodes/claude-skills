@@ -21,9 +21,27 @@ Converting the implementation plan "${1}" into discrete, executable tickets.
 3. Check the plan header for a **system tests** flag. If the plan says system tests are
    excluded (all /build-feature plans do), emit NO tickets that create files under
    `spec/system/` or `spec/features/`, and omit those paths from mixed tickets.
-4. If the plan lists Success Criteria traced from a PRD, distribute them: each criterion
-   should appear as an acceptance criterion on the ticket that implements it, so nothing is
-   verified only "at the end".
+4. If the plan's Success Criteria list contract IDs (`AC-n`, from
+   `.claude/acceptance-criteria/<slug>.md`), distribute them:
+   - every AC appears verbatim (ID + criterion) as an acceptance criterion on ≥1 ticket — the
+     ticket(s) implementing the plan step(s) the plan names for it — so nothing is verified
+     only "at the end"
+   - every ticket cites ≥1 AC in its Acceptance Criteria, or is tagged `infra` with a one-line
+     justification in its Description (e.g. "infra — migration serving TICKET-1-03 / AC-2")
+   - guard ACs from the plan's `## Not Building` list are copied onto every ticket they
+     constrain as **Must NOT** lines (`- [ ] Must NOT (AC-9): add an Export button to …`), so
+     the implementer sees the fence in the ticket they are working from
+   If the plan has no contract IDs, distribute its Success Criteria as before.
+5. If the plan has a `## Frontend → ### Copy` table, carry it onto the tickets — `/code` reads
+   tickets, not the plan, so copy that lives only in the plan is unenforced:
+   - every row goes onto the ticket(s) that render that screen/region as
+     `- [ ] Copy (allowed): "<string>" — <Kind>; <source AC or reason>` under Acceptance Criteria
+   - every `view` / `component` ticket that renders a screen also gets
+     `- [ ] Must NOT: render any other non-label/value/heading/button/validation-error text on
+     this screen (CLAUDE.md "UI Copy Discipline")` — including when the table is empty or says
+     "labels, values, and validation errors only"
+   - never invent copy while writing tickets; a ticket may not add `help_text:`,
+     `description:`, tooltip, or banner text the plan did not list
 
 ## Phase 2: Ticket Generation
 
@@ -81,6 +99,41 @@ Each ticket MUST follow this exact format:
 9. **Policies** - Group policies by phase
 10. **Configuration** - Group related config changes (routes, initializers)
 
+### Phase Size Cap
+
+Each `## Phase N` is executed by one fresh implementation agent (`/build-feature` runs one worker per
+phase), so a phase must fit comfortably in one context. Keep every phase to **at most 5 tickets and
+about 10 app files touched**, with no more than one L/XL ticket (a phase made only of S tickets — e.g.
+migrations — may hold up to 8). When a plan step is bigger (e.g. one
+seam that every caller must adopt), split it into consecutive phases along a dependency line — the
+seam and its direct specs first, then its callers in groups of ≤ 5 tickets. Splitting adds phases;
+it never reorders dependencies. (Measured 2026-09-22: an 8-ticket "core resolution & claims" phase ran 32 min at a
+399k-token peak; the other phases — 2 to 7 smaller tickets — ran 8–22 min at ~200k.)
+
+### Lanes and the Phase Schedule
+
+`/build-feature` runs independent phases **concurrently** (≤3 per wave) in one working tree, so
+every phase declares what it waits for and which files it owns. If the plan has a
+`### Work Lanes` table, map each row to one `## Phase N` (split a lane over the size cap into
+consecutive phases of the same lane). Without the table, derive lanes yourself the same way.
+
+- Under each `## Phase N` heading, before its tickets, add:
+  ```markdown
+  **After:** Phase 1, Phase 2        (or "None")
+  **Owns:** `app/services/foo/**`, `app/components/foo_*`, `spec/services/foo/**`, …
+  ```
+  `Owns:` covers every file in the phase's tickets' Files to Create / Files to Modify,
+  specs and factories included.
+- **Hot files** go only in phases that run **serial**: migrations and anything under `db/`,
+  `config/routes.rb`, `config/importmap.rb`, `config/locales/**`, `config/initializers/**`,
+  existing shared models, `spec/factories/` files for existing models, and `Gemfile*`. Put
+  them in the Foundation phase (first); cross-lane wiring (nav, shared partials, docs) goes in an
+  Integration phase (last).
+- Group phases into waves: a wave is the phases whose `After:` phases are all in earlier waves.
+  A wave runs **parallel** only if its phases' `Owns:` sets are disjoint and none holds a hot
+  file; otherwise split it into consecutive serial waves. Max 3 phases per wave.
+- A linear feature is one lane: every wave is serial. That is correct, not a failure.
+
 ### Dependency Resolution
 
 Order tickets so that:
@@ -120,6 +173,8 @@ The document should have this structure:
 | ... | ... | ... | ... | ... | ... |
 | **Total** | **{total}** | **{total}** | **{total}** | **{total}** | **{total}** |
 
+**Contract check**: ACs without a ticket: {list or None} • Tickets without an AC: {list or None} • `infra` tickets: {list or None}
+
 ## Dependency Graph
 
 {ASCII diagram showing ticket dependencies}
@@ -128,15 +183,29 @@ The document should have this structure:
 
 {Recommended order to execute tickets, grouped by what can be parallelized}
 
+## Phase Schedule
+
+| Wave | Phases | Mode | Why |
+|------|--------|------|-----|
+| 1 | Phase 1 | serial | Foundation — migrations, routes, shared models |
+| 2 | Phase 2, Phase 3 | parallel | disjoint Owns, no hot files |
+| 3 | Phase 4 | serial | Integration — nav + docs |
+
 ---
 
 ## Phase 1: {Phase Name}
+
+**After:** None
+**Owns:** `{glob}`, `{glob}`
 
 {All tickets for Phase 1}
 
 ---
 
 ## Phase 2: {Phase Name}
+
+**After:** Phase 1
+**Owns:** `{glob}`, `{glob}`
 
 {All tickets for Phase 2}
 
@@ -175,6 +244,22 @@ Before finalizing, validate:
 2. **Dependencies**: No circular dependencies exist
 3. **Testability**: Every ticket has clear acceptance criteria
 4. **Executability**: Each ticket can be independently completed by Claude Code
+5. **Contract check** (when the plan carries `AC-n` IDs): build two lists —
+   - **ACs with no ticket** — add each to the ticket that implements its plan step (create a
+     ticket if no step covers it and say so)
+   - **tickets with no AC** — tag `infra` with a justification, or drop the ticket if nothing
+     in the plan needs it
+   Print both lists (after fixing, ideally both "None") in the tickets document's Summary
+   under `**Contract check**: ACs without a ticket: … • Tickets without an AC: …`, and repeat
+   them in your closing message.
+6. **Schedule check** — for every wave in `## Phase Schedule`:
+   - every file in a phase's tickets is covered by that phase's `Owns:`
+   - in a `parallel` wave, no file matches two phases' `Owns:`, and no phase owns a hot file
+   - every `After:` phase sits in an earlier wave, and every ticket dependency points to the
+     same phase or to a phase in an earlier wave
+   On a violation, move the offending ticket to the Foundation or Integration phase, or make the
+   wave serial — never leave it. Correctness beats width. State the result in one line in your
+   closing message: `Schedule: <n> waves, max width <k>`.
 
 ## Important Instructions
 

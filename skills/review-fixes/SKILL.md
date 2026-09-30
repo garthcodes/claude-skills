@@ -1,6 +1,6 @@
 ---
 description: Turn /review and /scale-review findings into a prioritized, executable fix-ticket document grounded in the PR/feature context
-argument-hint: [review-file-or-latest] [scale-review-file-or-latest]
+argument-hint: '[review-file-or-latest] [scale-review-file-or-latest]'
 ---
 
 # Review Findings → Fix Tickets
@@ -45,13 +45,17 @@ You cannot fix issues well without knowing what the feature is *for*. Before ana
 1. **Current branch** — `git branch --show-current`
 2. **Base branch divergence** — `git log --oneline main..HEAD` and `git diff --stat main...HEAD`
 3. **PR metadata** — if a PR exists, `gh pr view --json title,body,number` (the review file may reference a PR URL — extract the number from it)
-4. **Feature intent** — from the review file's Overview/Summary sections, the PR body, and the most recent commit messages, write a 2-3 sentence internal summary of:
+4. **Acceptance-criteria contract** — strip `feature/` from the branch name and look for `.claude/acceptance-criteria/<slug>.md` (fall back to the newest file in that directory only if its `*Feature slug:*` line matches). If it exists, its `## Contract` table (`| ID | Type | Criterion | Source | Priority | Verified by |`) **is** the acceptance bar — do not reconstruct one from git or the PR:
+   - **Must** rows become the fix plan's **Acceptance-critical invariants**, listed as `AC-n — <criterion>`
+   - **guard** rows become the **Must-not invariants** (observable absences the PRD requires — no element/route/behavior the row names may be introduced by a fix)
+   - Read the PRD the contract links (`*PRD:*` header) for the problem statement and user-visible change
+5. **Feature intent** — from the contract's PRD (or, when no contract exists, the review file's Overview/Summary sections, the PR body, and the most recent commit messages), write a 2-3 sentence internal summary of:
    - What problem this PR is solving
    - What the user-visible/system-visible behavior change is
-   - What the acceptance bar is (e.g. "must match existing `ice_servers` response shape")
-5. **Project conventions** — read `CLAUDE.md` for service/controller/model/test patterns, Honeybadger conventions, multi-tenancy rules, and any domain-specific guidance
+   - What the acceptance bar is (the contract's Must rows when one exists; otherwise e.g. "must match existing `ice_servers` response shape")
+6. **Project conventions** — read `CLAUDE.md` for service/controller/model/test patterns, Honeybadger conventions, multi-tenancy rules, and any domain-specific guidance
 
-This context is what separates a good fix plan from a generic one: it lets you reject "clean up this thing" suggestions that would actually regress the feature, and it lets you correctly prioritize fixes that protect the feature's core promise.
+This context is what separates a good fix plan from a generic one: it lets you reject "clean up this thing" suggestions that would actually regress the feature, and it lets you correctly prioritize fixes that protect the feature's core promise. With a contract in hand it is also mechanical: a proposed fix that would make a **guard** row false, or that adds behavior no AC asks for (a reviewer's "while you're here, add X"), is **rejected** — a Dismissed Findings entry citing the AC — or **downgraded** with a **Severity Note** explaining that the contract forbids or doesn't ask for it.
 
 ## Step 3: Parse and Consolidate Findings
 
@@ -107,10 +111,16 @@ Save to `.claude/fix-plans/fix-plan-{branch-slug}-{YYYYMMDD}.md` (create the dir
 
 {2-3 sentence reconstruction from Step 2: what the PR does, why, and the acceptance bar. This is the frame every ticket below is judged against.}
 
+**Contract**: `{.claude/acceptance-criteria/<slug>.md or "(none — invariants reconstructed from git/PR)"}`
+
 **Acceptance-critical invariants** (do not break while fixing):
-- {e.g. "ice_servers JSON response shape must remain {urls, username, credential}"}
+- {With a contract: every Must row, e.g. "AC-1 — Given an admin on /settings, when …, then …"}
+- {Without: e.g. "ice_servers JSON response shape must remain {urls, username, credential}"}
 - {e.g. "Honeybadger context convention: service: self.class.name, external_service: "coturn""}
-- {...}
+
+**Must-not invariants** (guard rows — no fix may introduce these):
+- {every guard row, e.g. "AC-9 — no link or button whose text contains `Bulk export` on /settings"}
+- {or "(none)"}
 
 ---
 
@@ -242,7 +252,7 @@ Keep this to under 15 lines.
 
 ## Principles
 
-1. **Feature context first, findings second.** A fix that "addresses the review comment" but regresses the PR's purpose is a bad fix. Always reconcile findings against what the PR is trying to ship.
+1. **Feature context first, findings second.** A fix that "addresses the review comment" but regresses the PR's purpose is a bad fix. Always reconcile findings against what the PR is trying to ship — and, when a contract exists, against its Must rows and guard rows: a fix that violates a guard AC or adds unrequested behavior is rejected or downgraded with a note, never planned as-is.
 2. **Root cause, not symptom.** If a reviewer points at a controller but the real problem is a service, write the ticket against the service.
 3. **Merge overlapping findings.** If code and scale review both touch the same line, that's one ticket with two perspectives, not two tickets.
 4. **Be skeptical of reviewer severity.** Upgrade and downgrade where the code justifies it, but always explain why in a **Severity Note**.
@@ -259,4 +269,4 @@ Keep this to under 15 lines.
 - Dropping a reviewer finding silently — every finding ends up as a ticket OR a dismissed-findings entry, never nothing
 - Planning fixes that require architectural changes beyond the feature's scope without flagging it as a follow-up
 
-Begin by locating the review files, reading `CLAUDE.md`, and reconstructing the PR context from git. Only after that should you start building tickets.
+Begin by locating the review files, reading `CLAUDE.md`, and loading the acceptance-criteria contract (or reconstructing the PR context from git when there is none). Only after that should you start building tickets.

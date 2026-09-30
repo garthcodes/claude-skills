@@ -32,7 +32,12 @@ Throughout this skill, angle-bracket placeholders stand in for your project's re
 
 ## Production Safety (mandatory)
 
-Production (Fly app `<app-name>`) is **live** with real user data. Claude never runs any command against production automatically — no deploys, no `fly`/`flyctl` commands (bare `fly` commands default to production), no SSH or Rails consoles, no secrets or scaling changes, no `fly mpg` access, no rake tasks in prod, no mutating `gcloud`/`gsutil` — without explicit user approval for that specific command. The `claude-hook-prod-guard.py` PreToolUse hook enforces this: every production-targeting Bash command pauses for an approval prompt. Never attempt to work around the hook, and never treat approval of one command as approval for the next.
+Production (Fly app `<app-name>`) is **live** with real user data. The recommended setup gives Claude's environment no credential that can write to it: the shell's `FLY_API_TOKEN` is a read-only org token (`fly status`/`fly logs`/`fly secrets list` work; `fly ssh console`, `fly deploy`, `fly secrets set`, `fly scale`, `fly mpg connect` fail), the only database login Claude can use is a read-only Postgres role, and `gcloud` runs as a viewer-only service account. The `claude-hook-prod-guard.py` PreToolUse hook still pauses every production-targeting Bash command for approval — never work around it, and never treat approval of one command as approval for the next.
+
+- **Reads**: a read-only runner such as `bin/prod-read` (Ruby on stdin → `bin/rails runner` as the read-only role) and `bin/prod-sql` (psql). Use these for every production data question; never propose `fly ssh console … bin/rails runner` for a read.
+- **Writes** (deploys, secrets, scaling, rake tasks, restores): the user runs them in their own terminal with `flyadmin` (= `fly` with an admin token kept in the OS keychain) or `bin/deploy`. Claude writes the exact commands, one per line, in run order.
+- **Snapshot before every write**: any run instructions Claude produces — for a rake task, a destructive migration, a restore, a manual data fix — include `flyadmin mpg backup create <cluster-id>` immediately before the writing command, after the dry run.
+- **Go / no-go blurb after the command block**: two or three lines quoting what the dry run's final `RESULT:` line reads when it is safe to apply (expected counts filled in, or the expected shape with `errors=0`), plus the signals that mean stop (non-zero `unmatched`/`errors`, a `failed:` line, a count that differs from expected). The user decides from the terminal alone, without reading the task's source.
 
 ## Infrastructure Overview
 
@@ -270,17 +275,22 @@ fly logs --app <app-name>
 fly logs --app <app-name> --process web
 fly logs --app <app-name> --process worker
 
-# SSH into a running machine
-fly ssh console --app <app-name>
+# Read production data (Claude runs these; read-only role, no prompt)
+echo 'puts User.count' | bin/prod-read
+bin/prod-sql -c "select count(*) from users"
+
+# SSH into a running machine (user only — needs the admin token via flyadmin)
+flyadmin ssh console --app <app-name>
 
 # SSH and select specific machine
-fly ssh console --app <app-name> -s
+flyadmin ssh console --app <app-name> -s
 
-# Open Rails console on production (use with extreme care)
-fly ssh console --app <app-name> -C "bin/rails console"
-
-# Open a proxy to the database
-fly proxy 15432:5432 --app <app-name>
+# Run a shipped rake task on production (user only; dry run → snapshot → apply)
+flyadmin ssh console --app <app-name> -C "bin/rails <namespace>:<task>"
+flyadmin mpg backup create <cluster-id>
+flyadmin ssh console --app <app-name> -C "env APPLY=1 bin/rails <namespace>:<task>"
+# Always followed by a go / no-go blurb: the expected final `RESULT:` line of the
+# dry run, and what output means stop.
 
 # Check machine status
 fly machine list --app <app-name>
@@ -340,13 +350,13 @@ fly mpg connect <cluster-id>
 fly mpg status <cluster-id>
 
 # Create a backup/snapshot
-fly mpg snapshot create <cluster-id>
+fly mpg backup create <cluster-id>
 
 # List snapshots
-fly mpg snapshot list <cluster-id>
+fly mpg backup list <cluster-id>
 
 # Restore from snapshot
-fly mpg restore <cluster-id> --snapshot <snapshot-id>
+fly mpg restore <cluster-id> --backup-id <backup-id>
 
 # Resize Postgres
 fly mpg update <cluster-id> --plan <plan-name>
@@ -623,8 +633,8 @@ fly deploy --config fly.staging.toml --detach
    ```
 4. **Restore from backup**:
    ```bash
-   fly mpg snapshot list <cluster-id>
-   fly mpg restore <cluster-id> --snapshot <snapshot-id>
+   fly mpg backup list <cluster-id>
+   fly mpg restore <cluster-id> --backup-id <backup-id>
    ```
 
 ### Solid Queue Worker Issues
@@ -661,7 +671,7 @@ fly deploy --config fly.staging.toml --detach
 
 Start with the audit trail, not the logs — the AI audit log model records every call:
 ```bash
-fly ssh console --app <app-name> -C "bin/rails runner 'puts AiGenerationLog.order(created_at: :desc).limit(10).map { |l| [l.created_at, l.status, l.ai_model_name, l.error_message].join(\" | \") }'"
+echo 'puts AiGenerationLog.order(created_at: :desc).limit(10).map { |l| [l.created_at, l.status, l.ai_model_name, l.error_message].join(" | ") }' | bin/prod-read
 ```
 
 | Symptom | Cause | Fix |
@@ -781,11 +791,11 @@ jobs:
 
 1. Identify the snapshot to restore from:
    ```bash
-   fly mpg snapshot list <cluster-id>
+   fly mpg backup list <cluster-id>
    ```
 2. Restore to a new cluster (non-destructive):
    ```bash
-   fly mpg restore <cluster-id> --snapshot <snapshot-id> --name <app-name>-db-restored
+   fly mpg restore <cluster-id> --backup-id <backup-id> --name <app-name>-db-restored
    ```
 3. Verify data in restored cluster
 4. Update app to point to restored cluster:
@@ -882,7 +892,7 @@ When helping with DevOps tasks:
 1. **Gather context** - Read `fly.toml` (production) and `fly.staging.toml` (staging), check current `fly status`, review recent logs. For GCP tasks, also read `config/vertex_ai.yml`, `config/storage.yml`, and the repo docs listed in the GCP section
 2. **Diagnose before acting** - Understand the problem fully before proposing changes
 3. **Propose a plan** - Explain what will happen, what the risks are, and how to rollback
-4. **Execute carefully** - Run commands one at a time, verify each step. Every production-targeting command pauses for the user's approval via the prod-guard hook — wait for it, never bypass it, and never restructure commands to dodge the prompt
+4. **Execute carefully** - Reads: run them yourself with `bin/prod-read` / `bin/prod-sql`. Writes: hand the user the exact `flyadmin` / `bin/deploy` commands in run order, with `flyadmin mpg backup create <cluster-id>` before the writing step; they run them one at a time. Never bypass the prod-guard hook or restructure commands to dodge it
 5. **Verify the outcome** - Check health, logs, and metrics after changes
 6. **Document changes** - Note what was changed and why for future reference
 

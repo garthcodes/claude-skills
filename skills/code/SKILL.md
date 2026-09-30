@@ -1,6 +1,6 @@
 ---
 description: Execute implementation plans efficiently using specialized agents for rapid development
-argument-hint: [tickets-fixplan-or-plan-file, or latest]
+argument-hint: '[tickets-fixplan-or-plan-file, or latest] [— scope: Phase N | TICKET-… | P0–P2]'
 ---
 
 # Implementation Execution
@@ -31,6 +31,35 @@ Three document shapes, one execution model:
 
 Extract every work item with its dependencies and priority. Announce the doc and item count in
 one line.
+
+**Optional scope.** The argument may end with `— scope: <selector>` (the caller passes it when it
+splits one work document across several runs, e.g. `/build-feature` runs one worker per ticket
+phase). Selectors:
+
+- `scope: Phase N` — only the items under the tickets doc's `## Phase N` heading
+- `scope: TICKET-2-01, TICKET-2-03` — only the named items (any document shape)
+- `scope: P0–P2` (or `P0–P1`, `P2`) — only fix-plan items in those priority groups
+
+When scoped: execute only the selected items. A selected item whose dependency is **outside the
+scope and not yet ticked** in the document is reported as **BLOCKED** (name the dependency) and not
+implemented — the caller owns the ordering. Phase 3 becomes `bin/standardrb --fix <files you
+touched>` plus the selected items' specs only; **skip the full suite** (the caller runs it once for
+all scopes). Announce the scope with the item count. With no `scope:` suffix, behavior is unchanged.
+
+**Acceptance-criteria contract:** if the work document names a contract path
+(`.claude/acceptance-criteria/<slug>.md`), or one exists for the branch
+(`git branch --show-current`, strip `feature/`, look for that slug; fall back to the newest
+file in the directory only if its `*Feature slug:*` matches), read its `## Contract` table
+(`| ID | Type | Criterion | Source | Priority | Verified by |`). Then:
+
+- Implement only what a ticket's cited ACs (and its own text) require. An item's `AC-n`
+  references are its definition of done — not a starting point for "while I'm here".
+- Treat `guard` rows as **prohibitions**: they assert something must be absent (a button,
+  link, field, route, column, job, email). Do not add the element or behavior a guard forbids,
+  even when it is obviously useful or one line away — `/verify-acceptance` fails the build on
+  it.
+- If a work item and a guard row conflict, do not implement the conflicting part; record the
+  conflict in the report's Notes so the caller can resolve it.
 
 **Constraint check:** if the doc or the invoking context excludes system tests (the
 `/build-feature` pipeline always does), do NOT create files under `spec/system/` or
@@ -70,6 +99,14 @@ cost more than parallelism saves.
    - Migrations: `bin/rails generate migration`, then `bin/rails db:migrate` immediately;
      never touch `db/schema.rb` by hand
    - SoftDeletable models: `#soft_delete`, never `destroy`/`delete_all` expecting hard-delete
+   - UI copy: render only the strings the ticket's `Copy (allowed)` lines list, plus field
+     labels, column headers, headings, button verbs, values, and validation errors. No such
+     lines → the screen gets none. Never add `help_text:`, `hint:`, `description:` (on
+     `PageHeaderComponent`/`FormSectionComponent`), `TooltipComponent`, `HelpBubbleComponent`,
+     or an info `AlertBoxComponent` on your own initiative (CLAUDE.md "UI Copy Discipline")
+   - Design mockups: never open `*.dc.html` files — they carry inline styles that must not
+     leak into ERB. If a ticket lacks a component mapping for a region, the `## Regions`
+     table in `.claude/designs/<slug>/DESIGN.md` (branch slug) is the only design input
 3. Write the item's specs (model/service/controller/component/policy — per its Testing
    Requirements)
 4. Run **that item's specs only**: `bundle exec rspec <spec files>` — not the whole suite
@@ -84,12 +121,14 @@ codebase in a state where other items' specs fail because of a half-done item.
 
 ## Phase 3: Validate
 
-After all items:
+After all items (unscoped run):
 
 ```bash
 bin/standardrb --fix          # then fix anything it can't auto-fix
 bundle exec rspec              # full suite
 ```
+
+(Scoped run: `bin/standardrb --fix <touched files>` and the scoped items' specs only — no full suite.)
 
 Fix failures you introduced (max 3 cycles). Pre-existing failures on files you didn't touch:
 note them, don't chase them. (`bin/ci` is the caller's final gate — don't run it here.)
@@ -101,9 +140,11 @@ End with a compact summary:
 ```
 Implementation complete: <doc path>
 
+Scope:     <all | Phase N | ticket ids | P0–P2>
 Completed: X/Y items
 Skipped:   [item: reason, ...]  (or "none")
 Failed:    [item: reason, ...]  (or "none")
+Blocked:   [item: waiting on TICKET-…, ...]  (or "none"; scoped runs only)
 Tests:     <rspec result>  Lint: <standardrb result>
 Files:     <count> created, <count> modified
 Notes:     <deviations from the doc, decisions made, anything the caller must know>
@@ -119,7 +160,9 @@ Notes:     <deviations from the doc, decisions made, anything the caller must kn
 3. **Reuse over invention.** The plan/tickets already chose components and patterns; don't
    substitute your own.
 4. **No scope creep.** No refactoring beyond the items, no extra features, no documentation
-   files nobody asked for.
+   files nobody asked for. The contract's `guard` rows spell out the extras the PRD explicitly
+   excluded — anything they name is off-limits, and anything no AC or item asks for is scope
+   creep by default.
 5. **Report faithfully.** Skipped is skipped, failed is failed. A false "complete" costs more
    downstream (review, QA) than an honest gap.
 

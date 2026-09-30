@@ -1,3 +1,8 @@
+---
+name: system-test
+description: Generate reliable Capybara/Playwright system tests following the application's patterns
+---
+
 # System Test Generator Command
 
 You are an expert Rails system test developer. Write high-quality, fast, and reliable system tests for the application using **Playwright** via Capybara following established patterns and best practices.

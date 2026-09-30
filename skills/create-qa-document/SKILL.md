@@ -1,6 +1,6 @@
 ---
 description: Generate a QA plan document from branch changes, a feature description, or a feature-and-role pair for deep per-role QA (used by /full-qa)
-argument-hint: [feature-description-or-blank-for-current-branch] [--role=ROLE] [--full-feature]
+argument-hint: '[feature-description-or-blank-for-current-branch] [--role=ROLE] [--full-feature]'
 ---
 
 # Create QA Document Command
@@ -31,27 +31,38 @@ a worktree server on the worktree's own port (`PORT=` in its `.env`). Write the 
 
 **Parse `--role=`, `--full-feature`, and `--base-url=` from `$ARGUMENTS` first**, then treat the remaining text as the feature description / name.
 
-**PRD awareness (all modes):** If a PRD exists for the feature under `.claude/prds/` (check for
-one matching the branch/feature name, or referenced in commit messages), read it. Its
-**Acceptance Criteria** table (`| ID | Criterion | FR | Priority | Verified by |`, rows
-`AC-1`, `AC-2`, …) is the agreed contract the PR is gated on:
+**Acceptance-criteria awareness (all modes):** The AC source is the **contract file**, not
+the PRD. Resolve it: `git branch --show-current`, strip `feature/`, look for
+`.claude/acceptance-criteria/<slug>.md`; fall back to the newest file in that directory only
+if its `*Feature slug:*` line matches the branch/feature. Read the PRD the contract links
+(`*PRD:*` header) for context — UX flows, roles, **Edge Cases & Policies** (a source of
+edge-case scenarios with pre-decided expected behavior) — but the PRD contains no AC table;
+ignore any it happens to carry. The contract's `## Contract` table
+(`| ID | Type | Criterion | Source | Priority | Verified by |`, Type ∈ feature / permission /
+edge / guard) is what the PR is gated on:
 
 - **Every AC whose `Verified by` is `browser` or `browser+spec` MUST map to at least one
   scenario.** Design the scenario's steps and expected results so that the AC's *Then* clause
-  is asserted literally (same values, same visible text).
+  is asserted literally (same values, same visible text, same route).
+- **`guard` ACs become negative scenarios.** A guard row asserts an observable *absence*
+  (something the PRD says must NOT be built), so its scenario's expected result asserts that
+  absence concretely — e.g. "no button or link with text `Bulk export` is present on
+  `/settings`", "the `/clients/:id/export` route returns 404", "no email is enqueued". A
+  guard whose absence is checked in passing by another scenario still gets its own
+  `**Verifies:**` credit only if that scenario's Expected Results state the absence
+  explicitly.
 - Tag each scenario with the ACs it proves via a `**Verifies:**` line (see the template). A
   scenario may verify several ACs; an AC may need several scenarios (e.g. one per role).
 - Finish the document with an **AC Coverage** table (see the template) listing every browser
-  AC and the scenarios that cover it. If any browser AC has no scenario, list it under
-  **Uncovered** with a reason — never silently omit it; `/verify-acceptance` will mark it
+  AC, its Type, and the scenarios that cover it. If any browser AC has no scenario, list it
+  under **Uncovered** with a reason — never silently omit it; `/verify-acceptance` will mark it
   UNVERIFIED and `/build-feature` will not open a PR on an unverified Must AC.
 - `spec`-only and `manual` ACs are not yours to cover; leave them out of the coverage table.
 
-If the PRD predates the AC table (no `## Acceptance Criteria` section), fall back to its
-**Definition of Done** and per-FR **acceptance criteria** column as before — ensure every
-Definition of Done item and every Must-Have FR's acceptance criteria map to at least one
-scenario — and omit the AC Coverage table. In all cases use its **Edge Cases & Policies**
-table as a source of edge-case scenarios with pre-decided expected behavior.
+If **no contract file exists**, state that in one line directly under the document title
+(`*Acceptance-criteria contract: none found — AC coverage N/A*`), omit the AC Coverage table,
+and use `—` on every scenario's `**Verifies:**` line. Do not substitute the PRD's Definition
+of Done or FR table for the contract.
 
 ## Phase 1: Understand What Changed
 
@@ -196,8 +207,8 @@ Check which seed data is relevant to the feature being tested. **Always cross-ch
 | Portal token | Discover at runtime via `FormAssignment.with_valid_token.first.access_token` |
 
 **Seed Data Available:**
-- 625 clients across AZ and CO
-- ~3,750 appointments (4 weeks past, 2 weeks future)
+- Full seed: ~690 clients across AZ and CO, ~1,100 appointments; worktrees usually run the mini
+  seed (~50 clients, ~200 appointments). Both span 4 weeks past to 1 week ahead.
 - Clinical documents (progress notes, treatment plans, MSE, BPS)
 - Insurance policies and payers
 - Invoices and payment methods
@@ -444,7 +455,7 @@ Use the following template structure:
 #### SC-001: [Descriptive scenario title]
 
 **Priority:** Critical | High | Medium | Low
-**Verifies:** AC-1, AC-3 | — (no PRD acceptance criterion; e.g. HIPAA group scenarios)
+**Verifies:** AC-1, AC-3 | — (no contract AC; e.g. HIPAA group scenarios). Guard-AC scenarios assert an absence in Expected Results.
 **User Role:** [admin@example.com / therapist@example.com / etc.]
 **Viewport:** [1280x800 / 375x667]
 **Preconditions:**
@@ -477,13 +488,14 @@ Use the following template structure:
 
 ## AC Coverage
 
-[Only when the PRD has an Acceptance Criteria table. One row per AC with `Verified by`
-`browser` or `browser+spec`.]
+[Only when an acceptance-criteria contract exists for the branch. One row per AC with
+`Verified by` `browser` or `browser+spec`, Type copied from the contract.]
 
-| AC | Priority | Scenarios |
-|----|----------|-----------|
-| AC-1 | Must | SC-001, SC-004 |
-| AC-3 | Must | SC-002 |
+| AC | Type | Priority | Scenarios |
+|----|------|----------|-----------|
+| AC-1 | feature | Must | SC-001, SC-004 |
+| AC-3 | permission | Must | SC-002 |
+| AC-5 | guard | Must | SC-007 (negative — asserts absence) |
 
 **Uncovered:** [AC IDs with a one-line reason each, or "None"]
 
@@ -538,15 +550,15 @@ Use the following template structure:
 8. **Navigation paths must be explicit** - Don't say "go to the clients page." Say "Click 'Clients' in the left sidebar navigation."
 9. **Include cleanup** - If scenarios modify data, provide cleanup scripts.
 10. **One scenario per behavior** - Each SC-XXX should test one specific thing, making bug reports clear when they fail.
-11. **Tag acceptance criteria** - Every scenario carries a `**Verifies:**` line (`AC-n, …` or `—`). `/verify-acceptance` joins `/execute-qa`'s PASS/FAIL results to the PRD contract through these tags; an untagged scenario proves nothing to the gate.
+11. **Tag acceptance criteria** - Every scenario carries a `**Verifies:**` line (`AC-n, …` or `—`). `/verify-acceptance` joins `/execute-qa`'s PASS/FAIL results to the acceptance-criteria contract (`.claude/acceptance-criteria/<slug>.md`) through these tags; an untagged scenario proves nothing to the gate. Guard ACs are only credited by scenarios whose Expected Results assert the absence literally.
 
 ## Output
 
 When complete:
 1. Announce the QA document location
 2. Summarize the number of scenarios by priority
-3. When the PRD has an Acceptance Criteria table: `Acceptance criteria covered: X/Y browser
-   ACs` and the uncovered IDs, if any
+3. When a contract file exists: `Acceptance criteria covered: X/Y browser ACs (Z guards as
+   negative scenarios)` and the uncovered IDs, if any; otherwise "no contract — AC coverage N/A"
 4. List any data gaps that require setup scripts
 5. Note any areas that could not be fully covered and why
 
@@ -560,7 +572,7 @@ All extensions in this file (EXT-1 through EXT-6, plus EXT-7 itself) are **addit
 
 - **Output path — default / feature-description / full-feature without `--role=`**: `docs/qa-plans/{feature-name}-{YYYYMMDD}.md` (unchanged).
 - **Output path — full-feature with `--role=<role>` (added in EXT-1)**: `docs/qa-plans/{feature-name}-{role}-{YYYYMMDD}.md`. The role segment is required to keep per-role plans from clobbering each other when `/full-qa` invokes this skill once per accessible role on the same day. This is a deliberate change from the original "path unchanged" guarantee, scoped narrowly to the `--role=` case.
-- **`**Verifies:**` line and `## AC Coverage` table (added for `/verify-acceptance`)**: additive metadata. `/execute-qa` ignores both; plans for PRDs without an Acceptance Criteria table omit the coverage table and may use `—` on every scenario.
+- **`**Verifies:**` line and `## AC Coverage` table (added for `/verify-acceptance`)**: additive metadata. `/execute-qa` ignores both; plans for features with no acceptance-criteria contract omit the coverage table and use `—` on every scenario. The `Type` column in AC Coverage is likewise ignored by `/execute-qa`.
 - **Scenario IDs unchanged**: `SC-001`, `SC-002`, etc. HIPAA scenarios from Step 6.4 also use SC-NNN — they are categorized by being placed in the `## HIPAA & Compliance` Scenario Group, NOT by a different ID prefix. `/execute-qa` parses SC-NNN as the scenario identifier and would not recognize a `HIPAA-NNN` prefix.
 - **Setup Scripts section heading unchanged**: `### Setup Scripts`
 - **Authorization Matrix retained**: still required, now derived from Phase 1b Step 1b.4 policy reading

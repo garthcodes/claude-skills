@@ -12,8 +12,8 @@ Complete inventory of the Stedi clearinghouse integration in this repo. Verify p
 | `claim_client.rb` | 837P claim submission | Full payload builder; `PLACE_OF_SERVICE`, `FREQUENCY_CODES = {original: "1", corrected: "7", void: "8"}`, `TEST_PAYER_ID = "STEDITEST"` |
 | `claim_status_client.rb` | 276/277 claim status | Normalized status, payment info, denial info |
 | `era_client.rb` | 835 ERA — `/polling/transactions` | `CLAIM_STATUS_CODES` (CLP02 map), CARC adjustments, `DEFAULT_LOOKBACK = 30.days` |
-| `payers_directory_client.rb` | Payers directory CSV | Bulk payer fetch, separate base URL |
-| `payers_directory_parser.rb` | Payer CSV parser | `REQUIRED_HEADERS = %w[StediId PrimaryPayerId]` |
+| `claim_report_client.rb` / `claim_status_category.rb` | 277CA / claim-status reports | Report parsing and status-category mapping |
+| *(no payer-directory client)* | Payer directory | The CSV sync chain (`PayersDirectoryClient`, parser, `SyncPayersFromStediService`, `SyncPayersFromStediJob`, `payers:sync_from_stedi`) was deleted 2026-08-18. Prod payers are hand-curated; look payers up with `scripts/stedi_payer_family.py` and map fields per `references/payer-directory.md` |
 
 ## Pipeline services (`app/services/`)
 
@@ -37,6 +37,9 @@ Complete inventory of the Stedi clearinghouse integration in this repo. Verify p
 - `claim_generation_failure.rb` — unresolved-claim alerting; `needs_attention` scope
 - `claim_appeal.rb` — appeal_level: first_level/second_level/external_review
 - `remittance_advice.rb` — payment_method: check/eft/virtual_card
+- `payer.rb` — global, one row per state (not tenant-scoped, not SoftDeletable); `edi_payer_id` (837P/276 trading partner), `clearinghouse_payer_id` (270 trading partner), `stedi_id` (unique per state), `stedi_aliases` jsonb (ERA fallback match only), `payer_group_id` required; `supports_electronic_claims?`, `claim_filing_code`, curated `telehealth_pos` / `eap_modifier` in `submission_requirements` (`eap_modifier` = `HJ` on Optum EAP only; `Appointment#suggested_modifiers` emits it first, ahead of `95`, and only when `payer.eap?`)
+- `payer_group.rb` — curated carrier family = one credentialing contract; one optional parent level (EAP child → carrier); `resolve_or_create` is exact-name only and mints `auto_created` groups (importer path)
+- `user_payer_group.rb` — therapist × payer_group × state = holds the contract; `for_payer` scope is how the scheduler matches therapists to a policy's payer
 
 ## Jobs + schedules (`config/recurring.yml`)
 
@@ -71,7 +74,7 @@ Stedi jobs `retry_on Stedi::BaseClient::ApiError, wait: :polynomially_longer, at
 - `app/services/stedi/era_client.rb` — CLP02 map: 1/2/3/19/20/21 → paid, 4 → denied, 22 → adjusted, 23/25 → unknown
 - `app/models/fee_schedule.rb` — `rate_for(cpt_code, modifiers: [])`
 
-**POS derivation (resolved 2026-08-07)**: `Appointment#telehealth?` (virtual office OR video meeting) is the single telehealth signal; `Appointment#place_of_service_code` returns "10" (home — also the default when the popup-captured `telehealth_client_location` is unanswered), "02" (other location), or "11" (office). End-of-session popups capture the client location. `Stedi::ClaimClient#place_of_service_code` resolves claim POS → line POS → appointment → org default → neutral "11", then applies the curated `Payer#telehealth_pos` override (a top-level `submission_requirements` key that survives payer resync).
+**POS derivation (resolved 2026-08-07)**: `Appointment#telehealth?` (virtual office OR video meeting) is the single telehealth signal; `Appointment#place_of_service_code` returns "10" (home — also the default when the popup-captured `telehealth_client_location` is unanswered), "02" (other location), or "11" (office). End-of-session popups capture the client location; editing an unsubmitted claim's POS to 02/10 writes it back onto the appointment (`InsuranceClaim#sync_telehealth_client_location_to_appointment`, skipped under a payer override), and an appointment-side change re-stamps unsubmitted claims (`SyncsClaimPlaceOfService`). `Stedi::ClaimClient#place_of_service_code` resolves claim POS → line POS → appointment → org default → neutral "11", then applies the curated `Payer#telehealth_pos` override (a top-level `submission_requirements` key that survives payer resync).
 
 ## Docs in repo
 

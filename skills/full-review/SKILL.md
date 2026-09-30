@@ -17,6 +17,7 @@ End-to-end orchestrator: runs the code review, the scale review, consolidates bo
 ## Inputs
 
 - **$1** (optional): PR number. If omitted, the pipeline auto-detects the PR for the current branch via `gh pr list --head $(git branch --show-current)`. If no PR exists yet, the pipeline still runs against the local branch diff.
+- **`--plan-only`** (optional flag, anywhere in the arguments): run Steps 1–4 and the Step 6 summary, and **skip Step 5** (`/code`). The caller implements the fix plan itself — `/build-feature` does this in a fresh worker sub-agent so the review context and the implementation context stay separate. The summary then reports the fix-plan path, ticket counts by priority (P0–P3), and the Open Questions verbatim, with `Next steps: run /code <fix-plan path> — scope: P0–P2`.
 
 ## Autonomous Execution Policy
 
@@ -115,6 +116,8 @@ After this step, the orchestrator should print:
 If the fix plan contains **Open Questions** that block execution, surface them prominently before proceeding to Step 5 — the user may want to answer them rather than have the implementer guess.
 
 ## Step 5: Execute the Fix Plan
+
+**Skip this step entirely when `--plan-only` was passed** — go straight to Step 6.
 
 Invoke the implementer against the fix-plan:
 

@@ -44,6 +44,23 @@ in both directions: flag any PRD requirement the plan doesn't cover, and flag an
 adds that the PRD's "Out of Scope — Do NOT Build" list excludes (gold-plating is a finding, not
 a bonus).
 
+Also read the **Acceptance Criteria contract** if one exists for the branch:
+`git branch --show-current`, strip `feature/`, look for
+`.claude/acceptance-criteria/<slug>.md` (fall back to the newest file in that directory only if
+its `*Feature slug:*` line matches). Its `## Contract` table
+(`| ID | Type | Criterion | Source | Priority | Verified by |`, Type ∈ feature / permission /
+edge / guard) is what the PR will be gated on, so check the plan against it row by row:
+
+- **Omission** — an AC with no plan step that would make its *Then* true. A Must AC with no
+  covering step is a critical issue.
+- **Extra** — a plan step, component, model, column, route, or job that serves no AC and no
+  PRD FR. This is a finding, not a bonus; name the step and say "no AC/FR cites this".
+- **Guard violation** — a plan step that would build the very thing a `guard` row asserts is
+  absent (guard rows are how the pipeline catches extras; treat them as prohibitions).
+
+Report all three in the `## Contract Fidelity` section of the review. If no contract file
+exists, say so in that section and fall back to the PRD-only scope check above.
+
 ### Do NOT Flag (intentional project patterns)
 
 These look wrong to a generic Rails reviewer but are correct here — flagging them wastes a
@@ -168,6 +185,14 @@ Evaluate the plan against these criteria, organized by importance:
 3. **Future Extensibility**
    - Is the design flexible for likely changes?
    - Are extension points identified?
+
+4. **Lane Independence** (only when the plan has a `### Work Lanes` table)
+   - Does any lane touch a hot file (migrations/`db/`, `config/routes.rb`,
+     `config/importmap.rb`, locales, initializers, existing shared models)? Those belong in
+     Foundation.
+   - Do two lanes create or modify the same file, or does a lane need code another lane builds
+     without an `After` edge? Either move the shared piece to Foundation or chain the lanes.
+   - Report each problem as a Recommendation titled "Lane independence: …".
 
 ## Step 4: Generate Review Report
 
@@ -317,9 +342,29 @@ If applicable, present alternative architectures:
 
 ---
 
+## Contract Fidelity
+
+*Contract: `.claude/acceptance-criteria/<slug>.md` (or "none found — PRD-only scope check")*
+
+### Uncovered ACs (omissions)
+| AC | Priority | Criterion (abridged) | Why no plan step covers it |
+|----|----------|----------------------|----------------------------|
+
+### Unjustified plan steps (extras)
+| Plan step / component | What it adds | AC or FR that would justify it |
+|-----------------------|--------------|--------------------------------|
+[Every row here is a finding — "none" is the expected answer for a faithful plan]
+
+### Guard violations
+| AC (guard) | Asserted absence | Plan step that would build it |
+|------------|------------------|-------------------------------|
+
+---
+
 ## Checklist Before Implementation
 
 - [ ] All critical issues addressed
+- [ ] Every Must AC in the contract has a covering plan step; no step violates a guard AC
 - [ ] Security policies defined for new controllers
 - [ ] Database migrations reversible
 - [ ] Test strategy covers edge cases
@@ -351,7 +396,9 @@ If applicable, present alternative architectures:
 8. **Verify Before Flagging**: When the plan claims "component X exists" or "pattern Y is used
    in file Z", spot-check the codebase before flagging it as wrong
 9. **Guard Scope**: The PRD's scope boundary is part of the architecture — additions beyond it
-   are findings, not improvements
+   are findings, not improvements. When an acceptance-criteria contract exists, its `guard`
+   rows are that boundary made concrete: a plan step that would make a guard row false is a
+   defect, and a plan step no AC or FR asks for is an extra to flag.
 
 ## Anti-Patterns to Flag
 

@@ -1,0 +1,49 @@
+{
+  "skill_name": "page-speed",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to find the page on the app that is getting the slowest page load times using the rails pulse data we have in prod. Figure out the reason and possible improvements, explain the improvements ELI18, then implement them. Keep a local doc at docs/PAGE_PERFORMANCE_LOG.md with high level data on pages and what we've done recently so we rotate through pages, and track improvements.",
+      "expected_output": "Settles earlier work, ranks pages and shared costs, picks the top eligible target, diagnoses it from the drilldown with file references, prints a short tabular ELI18 plan and stops for 'implement'.",
+      "files": [],
+      "assertions": [
+        "Picks a page (or shared cost) that is not resting per the log, and says in the Picked line why",
+        "Runs shared_ops.sql and either targets or mentions the top shared cost",
+        "Diagnosis names concrete causes with file:line references from the drilldown",
+        "Plan labels SQL numbers with the operations window (ops_since), separate from the 14-day load times",
+        "Plan uses tables, ~20-30 lines, plain-language causes, MST times",
+        "Ends by waiting for 'implement' or adjustments; no per-change approval questions and no AskUserQuestion",
+        "No repo files modified"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "users#search showed up as slow in pulse, can you run the page speed thing on it",
+      "expected_output": "Forced page: uses users#search regardless of rotation, reports its stall-free vs raw numbers, and only proposes fixes if a steady-state cost >= ~20% of p50 exists; otherwise calls it a spike or fast and offers next steps.",
+      "files": [],
+      "assertions": [
+        "Uses users#search without applying rotation rules",
+        "Reports stall-free p50/p95 and compares them with the raw p95",
+        "If stall_hits > 0, runs stalls.sql and says whether jobs slowed too",
+        "Proposes fixes only for a steady-state cost >= ~20% of p50; otherwise offers the two next steps",
+        "Ends waiting for the user; no approval questions",
+        "No repo files modified"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "run the page speed pass again, the log is at evals/files/log_four_shipped.md (treat it as docs/PAGE_PERFORMANCE_LOG.md)",
+      "expected_output": "Settles shipped rows: #380 (appointments#index, deployed 09/22) is past 3 days and gets After numbers with sql_per_load; newer PRs stay shipped. Skips the four resting pages, notices any open page-speed worktree/perf PR, picks the next eligible target and stops at the plan.",
+      "files": ["evals/files/log_four_shipped.md"],
+      "assertions": [
+        "Checks deploys and fills After for #380 only if >= 3 days and >= 20 hits since deploy; no fabricated After numbers for the others",
+        "Says the old Before rows have no query count and compares p50/p95 only for them",
+        "Does not pick appointments#index, clients#show, staff/conversations#show or clients#index; cites rotation",
+        "Checks git worktrees / open perf/ PRs and treats their pages as in progress",
+        "Replaces rather than duplicates a same-date Trend row",
+        "Terminal plan is short, uses tables, and ends by waiting for 'implement'",
+        "No repo files modified"
+      ]
+    }
+  ]
+}

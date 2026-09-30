@@ -1,6 +1,6 @@
 # claude-skills
 
-A working library of 58 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications — planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that compose all of them into end-to-end pipelines.
+A working library of 68 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications — planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that compose all of them into end-to-end pipelines.
 
 This is my real, day-to-day setup (genericized for sharing — app names, hosts, and infra identifiers replaced with placeholders). It's shared so you can see how I work and borrow whatever is useful.
 
@@ -19,35 +19,24 @@ Each skill becomes available as a slash command in Claude Code (`/plan`, `/build
 The core idea: **small, single-purpose skills composed by orchestrators.** Leaf skills do one job well (write a PRD, plan a feature, generate model tests, hunt bugs in one feature). Orchestrator skills chain them into pipelines, usually by spawning each leaf skill in its own subagent so every stage gets a fresh context window.
 
 ```
-/build-feature  (the master pipeline)
+/build-feature  (the master pipeline — nine phase agents, handoff via .claude/pipeline-state.md)
 │
-├── bin/worktree-sweep ── remove worktrees whose PR is merged/closed (tooling/)
-├── /prd ──────────────── product requirements + agreed Acceptance Criteria table
-├── /plan ─────────────── implementation plan from codebase exploration
-│     ├── /architect-review ── critique the plan
-│     ├── /frontend-review ─── verify front-end requirements are planned
-│     └── /plan-system-tests ─ decide what deserves browser-level tests
-├── /tickets ──────────── split the plan into executable tickets
-├── /code ─────────────── execute tickets with specialized agents
-├── /full-review
-│     ├── /review ─────── code review (Claude Code built-in)
-│     ├── /scale-review ── architecture at launch scale
-│     ├── /review-fixes ── findings → prioritized fix tickets
-│     └── /code ────────── apply the fixes
-├── /security-review ──── branch diff (Claude Code built-in)
-├── /trace-requirements ─ every PRD requirement maps to code/spec evidence
-├── /plan-system-tests → /system-test-expert → /fix-system-test
-├── /create-qa-document → /execute-qa ── browser QA via Playwright
-├── /verify-acceptance ── AC scorecard → PR / draft PR / no PR (the acceptance gate)
-├── /simplify ─────────── diff-scoped cleanup (Claude Code built-in)
-└── bin/ci ────────────── full local CI as the final gate
+├── /acceptance-criteria → /review-acceptance-criteria ── PRD → reviewed AC contract (hard stop on FAIL)
+├── A1 setup + /plan ──────────── port-isolated worktree, implementation plan
+├── A2 plan reviews + /tickets ── /architect-review, /frontend-review, /plan-system-tests → tickets with lanes
+├── B1 /code ──────────────────── fresh worker sub-agents per ticket phase, up to three lanes in parallel
+├── B2 ‖ B3 ───────────────────── /full-review (/review → /scale-review → /review-fixes → /code)
+│                                 ‖ /security-review + /trace-requirements
+├── C1 ‖ C2 ───────────────────── /system-test-expert → /fix-system-test ‖ /create-qa-document → /execute-qa
+├── C3 /verify-acceptance ─────── AC scorecard: unmet Must → no PR, unmet Should → draft PR
+└── C4 ship ───────────────────── /simplify, bin/ci as the final gate, PR
 ```
 
 The other orchestrators follow the same pattern:
 
 | Orchestrator | Pipeline |
 |---|---|
-| `/build-feature` | PRD → plan → reviews → tickets → code → review → system tests → QA → acceptance gate → green CI → PR. Runs in a persistent, port-isolated worktree that stays up for review. The whole feature lifecycle in one command. |
+| `/build-feature` | PRD → AC contract → plan → reviews → tickets → code → review → system tests → QA → acceptance gate → green CI → PR. Nine phase agents (instructions in `phases/`), each with a fresh context; implementation runs in per-ticket worker sub-agents. Runs in a persistent, port-isolated worktree that stays up for review. |
 | `/build-feature-remote` | Kicks off `/build-feature` as a one-shot cloud routine for builds you don't want to babysit locally. |
 | `/full-review` | `/review` → `/scale-review` → `/review-fixes` → `/code` against a PR or the current branch. |
 | `/full-qa` | For every section of your feature catalog (`docs/APP_FEATURES.md`): `/create-qa-document` → `/execute-qa` with Playwright. Produces a resumable master bug index. Pure QA — never fixes. |
@@ -58,7 +47,7 @@ The other orchestrators follow the same pattern:
 | `/green-ci` | Runs `bin/ci`, diagnoses every failure, and routes each to the right fixer: `/rspec-test-expert`, `/fix-system-test`, or `/debug`. Loops until green. Never commits. |
 | `/fix-honeybadger` | Pulls the latest production error, then `/plan` → reviews → `/code` → `/review-rails` → Playwright verification → PR. |
 | `/audit-fixer` | Walks a severity-ranked audit document and runs `/plan` → `/code` per finding until all are handled. Never commits. |
-| `/worktree-sweep` | Removes pipeline worktrees whose PR is merged or closed — stops their server, drops their databases. `/build-feature` runs it first. |
+| `/worktree-sweep` | Removes **every** worktree except the main checkout — stops its server, drops its databases, force-removes it, no checks. Run by hand only. |
 
 **Why this works:** each stage runs in a fresh subagent context, so a 10-stage pipeline never blows the context window; every stage leaves an artifact on disk (PRD, plan, tickets, QA docs, bug indexes), so pipelines are resumable and auditable; and review stages are separate skills from build stages, so the critic isn't grading its own work.
 
@@ -77,6 +66,8 @@ The other orchestrators follow the same pattern:
 | `improve` | Critique exploration/planning docs and suggest better solutions |
 | `product-question` | Answer a product question in plain language from the code alone — never docs |
 | `product-question-tldr` | `/product-question`, then boil it down to one ELI18 takeaway |
+| `acceptance-criteria` | Derive the Acceptance Criteria contract from a PRD — one observable Given/When/Then row per requirement, edge case, permission denial and out-of-scope guard |
+| `prd-worktree` | Create a bare git worktree for writing a PRD (no databases, no port) |
 
 ### Review
 | Skill | Purpose |
@@ -86,7 +77,8 @@ The other orchestrators follow the same pattern:
 | `scale-review` | Analyze a feature's architecture against your launch-scale target |
 | `review-fixes` | Turn review findings into a prioritized fix-ticket document |
 | `review-rails` | Review the current branch for quality, security, Rails 8 conventions |
-| `trace-requirements` | Map every PRD requirement to code/spec evidence in the branch diff |
+| `review-acceptance-criteria` | Audit an Acceptance Criteria contract against its PRD — completeness, fidelity, verifiability — fix it in place and stamp it PASS |
+| `trace-requirements` | Map every PRD requirement (and every acceptance-criteria row) to code/spec evidence in the branch diff |
 | `verify-acceptance` | Score every agreed PRD acceptance criterion against QA results and specs — the scorecard `/build-feature` gates the PR on |
 | `audit-fixer` | Orchestrator — see above |
 | `full-review` | Orchestrator — see above |
@@ -106,6 +98,8 @@ Deep reference skills that Claude loads when doing that kind of work:
 | `debug` | Structured debugging and error analysis |
 | `worktree` | Spin up a git worktree with its own databases and dev server port |
 | `worktree-sweep` | Orchestrator — see above |
+| `merge-main` | Merge `origin/main` into the current branch, resolve every conflict keeping both sides' intent, verify, commit and push |
+| `resolve-issue` | GitHub issue → isolated worktree → investigate → short plan → implement with specs → PR that closes the issue |
 | `stedi-billing-expert` | Healthcare billing via the Stedi clearinghouse: eligibility (270/271), claims (837P), status (276/277), ERAs (835). Verifies against live Stedi docs |
 
 ### Testing
@@ -127,6 +121,9 @@ Deep reference skills that Claude loads when doing that kind of work:
 | `feature-qa` | Deep QA of one feature on staging, across roles |
 | `bug-hunt` | Hunt for bugs in one feature with Playwright |
 | `bug-hunt-fix` | Fix one reported bug and verify the fix in the browser |
+| `qa-branch` | Hand-QA the current branch in your own Chrome — seeds the data, signs in as the right role, walks you through one scenario at a time |
+| `native-bug-hunt` / `native-bug-hunt-fix` | Hunt and fix bugs in a Ruby Native (iOS/Android WebView shell) app — drives the Android emulator and reads inside the WebView via a dev-only debug beacon |
+| `time-display-audit` | Audit every place the app renders a date or time against per-surface timezone/format rules, then fix every finding and drive `bin/ci` green |
 | `full-qa` / `full-qa-fix` / `bug-hunt-all` / `fix-bug-index` | Orchestrators — see above |
 
 ### Production ops
@@ -137,6 +134,7 @@ Deep reference skills that Claude loads when doing that kind of work:
 | `impact-assessment` | Scope a production bug's blast radius + generate a remediation task |
 | `user-docs` | Generate a user-facing handbook doc for a feature (also the corpus for an in-app help assistant) |
 | `sync-user-docs` | Sync the user-doc corpus with everything deployed to production since the last sync, and open a PR |
+| `page-speed` | Find the page users wait on most using production Rails Pulse data, diagnose it, propose a short plan, then fix it on a branch and track before/after in a log |
 
 ## Conventions these skills assume
 
@@ -147,7 +145,7 @@ These skills grew inside one Rails app, so they lean on a few conventions. Adapt
 - **`docs/APP_FEATURES.md`** — a sectioned catalog of your app's features. `/full-qa` and `/bug-hunt-all` iterate over its top-level sections.
 - **`bin/ci`** — one script that runs lint + security + tests locally. `/green-ci` and `/build-feature` treat it as the gate.
 - **`bin/dev-url`, `bin/worktree-port`, `bin/worktree-sweep`** — small helpers so the QA skills find the right dev server whether they run in the main checkout or a `/build-feature` worktree (each worktree gets its own `PORT=` and `DATABASE_SUFFIX` in `.env`). Shipped in [`tooling/`](tooling/).
-- **Production safety** — the ops skills never run a production-targeting command without explicit per-command approval. The `claude-hook-prod-guard.py` PreToolUse hook in [`tooling/`](tooling/) enforces that.
+- **Production safety** — the ops skills never run a production-targeting command without explicit per-command approval. The `claude-hook-prod-guard.py` PreToolUse hook in [`tooling/`](tooling/) enforces that. Production reads (`/page-speed`, `/impact-assessment`, `devops-expert`) assume read-only wrappers — `bin/prod-read` (Ruby on stdin) and `bin/prod-sql` (raw SQL) connecting as a read-only database role — which are not shipped here; writes are always run by the user after a database snapshot.
 - **`.claude/prds/`** — where `/prd` writes and `/plan` reads product requirement docs.
 - **Built-ins**: `/review`, `/security-review`, and `/simplify` are Claude Code built-in skills, referenced by the orchestrators but not part of this repo.
 - **Placeholders**: anything in `<angle-brackets>` (`<app-name>`, `<app-host>`, `<app>` for the database prefix, `<gcp-project>`, `<practice-name>`) or at `example.com` / `localhost:3000` is yours to fill in.

@@ -1,3 +1,8 @@
+---
+name: model-test
+description: Generate RSpec model tests (validations, associations, scopes) following the application's patterns
+---
+
 # Model Test Generator Command
 
 You are an expert Rails model test developer. Write comprehensive, fast, and maintainable RSpec model tests for the application following established patterns and best practices.

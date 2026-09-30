@@ -18,13 +18,13 @@ If the root cause is not yet known, run `/fix-honeybadger` or `/debug` first.
 
 ## Key Constraint
 
-Claude does **not** have access to the production database. This skill produces two scripts:
-1. **Diagnostic script** — user runs in production, outputs JSON with affected record IDs and details
-2. **Remediation rake task** — accepts the diagnostic output as input, fixes the affected records
+Claude has **read-only** access to the production database through `bin/prod-read` / `bin/prod-sql` (`claude-ro` user; see CLAUDE.md "Production Safety" and `docs/PROD_READ_ACCESS.md`) and **no** write access. This skill produces two scripts:
+1. **Diagnostic script** — read-only; Claude runs it against production itself with `bin/prod-read`, outputs JSON with affected record IDs and details
+2. **Remediation rake task** — accepts the diagnostic output as input, fixes the affected records; the **user** runs it in production after a database snapshot
 
 This ensures all data in the impact assessment is real production data, never estimates.
 
-**You never run these against production yourself.** You author the diagnostic script and remediation rake task; the user executes them in production (or explicitly approves each command — the `claude-hook-prod-guard.py` hook pauses any production-targeting command for approval).
+**You never write to production yourself.** You author the remediation rake task and hand the user the run commands (dry run → `flyadmin mpg backup create <cluster-id>` → apply); they run them in their own terminal (`flyadmin` = `fly` with an admin-scoped token; your read-only token cannot write).
 
 ## Phase 1: Gather Impact Data from Honeybadger
 
@@ -93,7 +93,7 @@ For each "yes", identify:
 
 ### Step 5: Design the Diagnostic Script
 
-Create a rake task that the user runs in production to discover affected records. This script:
+Create a rake task to discover affected records. It runs locally against production through `bin/prod-read` (the diagnostic is plain Ruby, so pipe the task body — or a `tmp/diagnose_<short_description>.rb` copy of it — into `bin/prod-read`; the read-only user makes any write raise `PG::InsufficientPrivilege`). This script:
 - **Only reads data** — never writes or modifies anything
 - **Outputs JSON to stdout** — structured data that can be piped to the remediation task
 - **Scoped to the exposure window** — only queries records within the affected time range
@@ -239,19 +239,15 @@ namespace :data do
 
     puts
     puts "=" * 60
-    puts "Results:"
-    puts "  Records in diagnosis: #{affected_records.size}"
-    puts "  Skipped:              #{skipped_count}"
-    if dry_run
-      puts "  Would fix:            #{affected_records.size - skipped_count}"
-      puts
-      puts "To apply changes:"
-      puts "  bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json DRY_RUN=false"
-    else
-      puts "  Fixed:                #{fixed_count}"
-      puts "  Errors:               #{error_count}"
-    end
+    puts "Records in diagnosis: #{affected_records.size}"
+    puts "To apply: bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json DRY_RUN=false" if dry_run
     puts "=" * 60
+    # RESULT is always the last line: the go / no-go blurb in the run instructions quotes it.
+    if dry_run
+      puts "RESULT: would_fix=#{affected_records.size - skipped_count} skipped=#{skipped_count} errors=#{error_count} (dry run)"
+    else
+      puts "RESULT: fixed=#{fixed_count} skipped=#{skipped_count} errors=#{error_count}"
+    end
   end
 end
 ```
@@ -373,12 +369,18 @@ bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json
 bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json DRY_RUN=false
 ```
 
+**Dry run — go / no-go.** Safe to apply when the dry run's last line reads
+`RESULT: would_fix=<N> skipped=0 errors=0 (dry run)` with `<N>` equal to the record count in
+`diagnosis.json`, and every `[DRY RUN] Would fix …` line shows the expected `current -> expected`
+change. Stop and report back if `errors` is non-zero, `would_fix` differs from `<N>`, or any
+`[ERROR]` / `[SKIP]` line appears that the diagnosis did not predict.
+
 ### Post-Deploy Checklist
 - [ ] Deploy the code fix
 - [ ] Run diagnostic script in production: `bundle exec rake data:diagnose_<short_description> > diagnosis.json`
 - [ ] Review `diagnosis.json` — confirm affected records look correct
 - [ ] Run remediation in dry-run: `bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json`
-- [ ] Review dry-run output
+- [ ] Review dry-run output — last line matches the go / no-go blurb above
 - [ ] Run remediation for real: `bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json DRY_RUN=false`
 - [ ] Verify affected records are corrected
 - [ ] Monitor Honeybadger for recurrence
@@ -404,18 +406,20 @@ EOF
 - Remediation script: `lib/tasks/remediate_<short_description>.rake`
 - PR updated with impact assessment and post-deploy checklist
 
-### Post-Deploy Instructions
-1. Deploy the fix
-2. Run diagnostic: `bundle exec rake data:diagnose_<short_description> > diagnosis.json`
-3. Review `diagnosis.json`
-4. Dry-run remediation: `bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json`
-5. Apply remediation: `bundle exec rake data:remediate_<short_description> INPUT=diagnosis.json DRY_RUN=false`
-6. Monitor Honeybadger for 24 hours
+### Post-Deploy Instructions (user runs steps 1 and 4–6 in their own terminal)
+1. Deploy the fix: `bin/deploy production`
+2. Run diagnostic (Claude, read-only): `bin/prod-read < tmp/diagnose_<short_description>.rb > tmp/diagnosis.json`
+3. Review `tmp/diagnosis.json`
+4. Dry-run remediation: `flyadmin ssh console -a <app-name> -C "sh -c 'bin/rails data:remediate_<short_description> INPUT=-'" < tmp/diagnosis.json`
+   Go when the last line reads `RESULT: would_fix=<N> skipped=0 errors=0 (dry run)` (N = records in `diagnosis.json`); stop on non-zero `errors` or a different `would_fix`.
+5. Snapshot the database: `flyadmin mpg backup create <cluster-id>`
+6. Apply remediation: `flyadmin ssh console -a <app-name> -C "sh -c 'DRY_RUN=false bin/rails data:remediate_<short_description> INPUT=-'" < tmp/diagnosis.json`
+7. Monitor Honeybadger for 24 hours
 ```
 
 ## Important Guidelines
 
-1. **Never modify production data directly** — always use a rake task that can be reviewed and audited
+1. **Never modify production data directly** — always use a rake task that can be reviewed and audited; the user runs it, and the run instructions always put `flyadmin mpg backup create <cluster-id>` between the dry run and the apply
 2. **Two-script pattern** — diagnostic script reads and outputs JSON; remediation script consumes that JSON
 3. **Diagnostic script is read-only** — it must never write to the database
 4. **Remediation script is input-driven** — it only fixes records listed in the diagnostic output, never queries independently
@@ -425,6 +429,7 @@ EOF
 8. **Tenant awareness** — use `ActsAsTenant.without_tenant` in diagnostic, `ActsAsTenant.with_tenant` per-record in remediation
 9. **PHI sensitivity** — script output should include record IDs but minimize PHI (no client names, DOBs, etc.)
 10. **No silent failures** — log every record examined, every change made, and every error encountered
+12. **Checkable ending** — the remediation task prints a `DRY RUN` / `LIVE` banner first and ends with exactly one `RESULT: would_fix=… skipped=… errors=…` line (`fixed=` in live mode, `(dry run)` suffix in dry-run mode), and the run instructions carry a go / no-go blurb quoting that line with expected numbers (CLAUDE.md "Writing to production")
 11. **stderr for status, stdout for data** — diagnostic script sends progress to `$stderr`, JSON to `$stdout`
 
 ## When No Data Remediation Is Needed

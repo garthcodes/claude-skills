@@ -1,40 +1,59 @@
 ---
-description: Score every agreed PRD acceptance criterion against QA results, system tests, and spec evidence — report-only, produces the scorecard /build-feature gates the PR on
-argument-hint: [prd-path-or-blank]
+description: Score every row of the reviewed Acceptance Criteria contract (.claude/acceptance-criteria/<slug>.md) against QA results, system tests, and spec evidence — report-only, produces the scorecard /build-feature gates the PR on
+argument-hint: [contract-or-prd-path-or-blank]
 ---
 
 # Acceptance Criteria Verification
 
-Score the current branch against the PRD's **agreed Acceptance Criteria** table at "${1:blank}":
-for every `AC-n` row, find evidence that the criterion was actually *observed* to hold — a
-passing Playwright QA scenario, a passing system spec, a passing unit/controller spec, or a
-quoted manual check — and produce a scorecard with a verdict. This skill **analyzes and
-reports only** — it never edits code, specs, QA plans, or the PRD. Callers (a human, or the
-`/build-feature` pipeline) own remediation.
+Score the current branch against the **Acceptance Criteria contract**
+(`.claude/acceptance-criteria/<slug>.md`) resolved from "${1:blank}": for every `AC-n` row,
+find evidence that the criterion was actually *observed* to hold — a passing Playwright QA
+scenario, a passing system spec, a passing unit/controller spec, or a quoted manual check — and
+produce a scorecard with a verdict. This skill **analyzes and reports only** — it never edits
+code, specs, QA plans, the PRD, or the contract. Callers (a human, or the `/build-feature`
+pipeline) own remediation.
 
 Where `/trace-requirements` asks "does code exist for this requirement?" (static), this skill
 asks "was this outcome demonstrated?" (dynamic). Code that plausibly implements a criterion
 is **not** evidence here.
 
-## Phase 1: Resolve the PRD and the contract
+## Phase 1: Resolve the contract
 
-- If "${1}" is a path, read that PRD.
+The contract is the standalone file written by `/acceptance-criteria` and stamped by
+`/review-acceptance-criteria` — never a table inside the PRD.
+
+- If "${1}" is a path under `.claude/acceptance-criteria/`, read that contract.
+- If "${1}" is a PRD path (`.claude/prds/<slug>.md`), derive the slug from the PRD's
+  `*Feature slug:*` header (else its filename) and look for
+  `.claude/acceptance-criteria/<slug>.md`.
 - If blank, resolve from the branch: `git branch --show-current`, strip the `feature/` prefix,
-  and look for `.claude/prds/<slug>.md`. Fall back to `ls -t .claude/prds/*.md | head -1` only
-  if its `*Feature slug:*` header plausibly matches the branch.
-- If no PRD can be found, **stop** and say so.
+  and look for `.claude/acceptance-criteria/<slug>.md`. Fall back to
+  `ls -t .claude/acceptance-criteria/*.md | head -1` only if its `*Feature slug:*` line
+  plausibly matches the branch.
+- If no contract can be found, **stop**: "No acceptance-criteria contract — run
+  `/acceptance-criteria <prd>` then `/review-acceptance-criteria`." Do not fabricate criteria
+  from the PRD's FR table or Definition of Done, and ignore any `## Acceptance Criteria`
+  section embedded in a PRD; an unreviewed contract can't gate anything.
 
-Extract the `## Acceptance Criteria` table (`| ID | Criterion | FR | Priority | Verified by |`).
+Follow the contract's `*PRD:*` link and read the PRD **for context only** (feature name, intent,
+what an FR-n / OOS-n / EC-n source refers to). Nothing in the PRD adds, removes, or
+re-prioritizes a row.
 
-- If the section is **missing**, stop: "This PRD has no Acceptance Criteria table — run `/prd`
-  (or re-run it on this PRD) to draft and agree criteria." Do not fabricate criteria from the
-  FR table or Definition of Done; an unagreed contract can't gate anything.
-- If the `*Agreed with user: …*` stamp is **absent**, still score the table but mark the report
-  **UNAGREED** in the header and in the verdict line — the caller must not treat the verdict
-  as a ship signal.
-- Tolerate drift: `Verified by` missing → treat as `browser`; priority missing → `Must`.
+Parse the `## Contract` table (`| ID | Type | Criterion | Source | Priority | Verified by |`):
+- **Type** is `feature`, `permission`, `edge`, or `guard`. Guard rows assert an observable
+  **absence** (something the PRD says must NOT be built or must NOT change) and are scored
+  under the same evidence rules as every other row — see Phase 3.
+- **Source** cites the PRD items the row proves (`FR-2`, `OOS-1`, `EC-3`, `PERM-…`, `UX-…`,
+  `DOD-n`); carry it into the scorecard so a gap can be read back to the PRD.
+- Tolerate drift: `Verified by` missing → treat as `browser`; priority missing → `Must`;
+  Type missing → `feature`.
 
-Record the slug (`FEATURE_SLUG`) for locating artifacts below.
+Check the `*Review status:*` header line. If it is not `PASS …` (i.e. `UNREVIEWED` or
+`FAIL …`), still score every row but mark the report **UNREVIEWED** in the header and in the
+verdict line — the caller must not treat the verdict as a ship signal until
+`/review-acceptance-criteria` has stamped the contract PASS.
+
+Record the slug (`FEATURE_SLUG`) and the contract path for locating artifacts below.
 
 ## Phase 2: Gather evidence
 
@@ -60,7 +79,9 @@ Collect everything, then join. Do the analysis inline with Grep/Glob/Read/Bash �
    and capture the output. If the command isn't safe to run or isn't stated, the AC is
    UNVERIFIED with a note.
 6. **Supporting** — newest `.claude/requirement-traces/trace-${FEATURE_SLUG}-*.md`, if any.
-   Use it only for the Evidence column's "code:" pointer; it never upgrades a status.
+   Use it only for the Evidence column's "code:" pointer; it never upgrades a status. Also
+   note the newest `.claude/acceptance-criteria-reviews/review-${FEATURE_SLUG}-*.md` (the
+   contract's review report) for the scorecard header; it is provenance, not evidence.
 
 Artifacts that are simply absent are not errors — they just mean less evidence. **Never treat
 a missing QA report as PASS**; browser ACs without a report are UNVERIFIED.
@@ -84,6 +105,17 @@ Layer rules:
 - `manual` — the stated command was run and its output matches the criterion; **quote the
   proving output** in Evidence.
 
+**Guard rows** (`Type = guard`) follow the same layer rules with one extra demand: the evidence
+must assert the *absence* literally. A `browser` guard needs a PASS QA scenario or passing
+system-spec example whose *Then* / expectation states the absence the row names
+(`expect(page).not_to have_link("Bulk export")`, "no element with text `Export` exists",
+"`client_messages` count unchanged and no job enqueued") — a scenario that merely exercised the
+neighbouring feature without looking for the forbidden thing is not coverage, and neither is
+"nothing in the diff adds it" (that is `/trace-requirements`' static check, not observation). A
+`spec` guard needs a passing example whose expectation is the negative. Score guards
+VERIFIED / FAILED / UNVERIFIED exactly like feature rows; a FAILED guard means the forbidden
+thing was observed to exist and is reported as such.
+
 Rules of evidence:
 - Never mark VERIFIED from reading application code, from the requirements trace, from a QA
   plan that was never executed, or from a spec you didn't run.
@@ -93,7 +125,7 @@ Rules of evidence:
   console error on the page), the AC is still FAILED — the scenario is the unit of evidence —
   but say so in Notes so the fixer knows what to chase.
 
-**Verdict** (agreed table only):
+**Verdict** (contract rows only — every Type counts, guards included):
 - **PASS** — every AC VERIFIED
 - **PASS WITH SHOULD GAPS** — every **Must** AC VERIFIED; ≥1 Should is FAILED/UNVERIFIED
 - **FAIL** — any **Must** AC is FAILED or UNVERIFIED
@@ -106,24 +138,26 @@ directory if needed):
 ```markdown
 # Acceptance Scorecard: [Feature Name]
 
-**PRD**: [path] — Acceptance Criteria agreed [date] | **UNAGREED**
+**Contract**: [`.claude/acceptance-criteria/<slug>.md`] — Review status: PASS YYYY-MM-DD | **UNREVIEWED** · review report [`.claude/acceptance-criteria-reviews/review-<slug>-*.md` or "none"]
+**PRD**: [path] (context only)
 **Branch**: [branch] (base: main)
 **Evidence**: QA plan [path or "none"] · QA report [path or "none"] · system specs [N files, run
 at HH:MM] · other specs [N files] · manual checks [N]
 
-**Verdict**: PASS | PASS WITH SHOULD GAPS | FAIL
-**Must**: X/Y verified • **Should**: X/Y verified
+**Verdict**: PASS | PASS WITH SHOULD GAPS | FAIL [— **UNREVIEWED** when the contract is not stamped PASS]
+**Must**: X/Y verified • **Should**: X/Y verified • **Guards**: X/Y verified
 
 ---
 
 ## Scorecard
 
-| AC | Priority | Verified by | Status | Evidence | Notes |
-|----|----------|-------------|--------|----------|-------|
-| AC-1 | Must | browser | VERIFIED | SC-003 PASS; `spec/system/x_spec.rb:12` pass | |
-| AC-2 | Must | spec | FAILED | `spec/services/y_spec.rb:40` FAIL | expected 0 results, got 2 |
-| AC-3 | Must | browser | UNVERIFIED | — | no SC or system spec names AC-3 |
-| AC-4 | Should | manual | VERIFIED | `bin/rails z:task DRY_RUN=1` → "Would delete 14 …" | |
+| AC | Type | Source | Priority | Verified by | Status | Evidence | Notes |
+|----|------|--------|----------|-------------|--------|----------|-------|
+| AC-1 | feature | FR-1 | Must | browser | VERIFIED | SC-003 PASS; `spec/system/x_spec.rb:12` pass | |
+| AC-2 | feature | FR-2 | Must | spec | FAILED | `spec/services/y_spec.rb:40` FAIL | expected 0 results, got 2 |
+| AC-3 | permission | PERM-therapist-manage | Must | browser | UNVERIFIED | — | no SC or system spec names AC-3 |
+| AC-4 | feature | FR-4 | Should | manual | VERIFIED | `bin/rails z:task DRY_RUN=1` → "Would delete 14 …" | |
+| AC-5 | guard | OOS-1 | Must | browser | UNVERIFIED | SC-007 PASS | SC-007's Then never asserts the absence of `Bulk export` — add the negative step |
 
 ---
 
@@ -148,20 +182,21 @@ older than the plan; a `manual` command you declined to run and why; a scenario 
 was unrelated to the AC's clause.]
 ```
 
-End your response with the verdict line, the Must/Should counts, the list of non-VERIFIED
-**Must** IDs (if any), and the report path.
+End your response with the verdict line (with **UNREVIEWED** when applicable), the
+Must/Should/Guards counts, the list of non-VERIFIED **Must** IDs (if any), and the report path.
 
 ## Principles
 
-1. **Report-only.** Never edit code, specs, QA plans, or the PRD — even to add a one-line
-   `Verifies:` tag. The caller owns remediation.
+1. **Report-only.** Never edit code, specs, QA plans, the PRD, or the contract — even to add
+   a one-line `Verifies:` tag. The caller owns remediation.
 2. **Observed, not inferred.** VERIFIED means something ran and showed the outcome. If you
    didn't see it pass, it isn't verified.
 3. **Must gaps are the headline.** An unverified Should is a note; an unverified Must is the
    verdict — and, in `/build-feature`, no PR.
-4. **The agreed table is the whole contract.** Don't invent criteria, don't drop rows, don't
-   re-prioritize. If the table is wrong, say so under Ambiguities and let a human change it.
+4. **The reviewed contract is the whole contract.** Don't invent criteria, don't drop rows,
+   don't re-prioritize, don't skip guards. If the contract is wrong, say so under Ambiguities
+   and let `/review-acceptance-criteria` change it.
 5. **Precise UNVERIFIEDs.** "No coverage" must name what would cover it; "partial" must name
    the missing clause.
 
-Begin by resolving the PRD.
+Begin by resolving the contract.

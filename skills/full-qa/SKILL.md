@@ -113,7 +113,7 @@ puts "portal_token: #{FormAssignment.with_valid_token.first&.access_token ? "OK"
 '
 ```
 
-**If any role is MISSING**, run `bin/rails db:seed` silently (no prompt) and re-check. If still missing after seed, stop with a clear gap report.
+**If any role is MISSING**, run `bin/rails db:seed:validate` to see what is absent. On an empty database run `bin/rails db:seed` silently (no prompt; `db:seed` skips a database that is already seeded) and re-check. If still missing, stop with a clear gap report.
 
 ### Step 0.4: Stripe test mode (warn-only)
 
@@ -350,7 +350,7 @@ Smart per-feature judgment. Reset if the **prior feature** did anything globally
 
 If reset is warranted:
 ```bash
-bin/rails db:reset && bin/rails db:seed
+bin/rails db:reset    # drops, reloads the schema, and runs the full seed (~10 min)
 ```
 …and re-confirm seeded users still exist via the Phase 0.3 check (db:reset wipes everything).
 

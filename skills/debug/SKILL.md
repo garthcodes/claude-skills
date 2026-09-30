@@ -1,6 +1,6 @@
 ---
 description: Debug and analyze errors following best practices
-argument-hint: [error-message] [context...]
+argument-hint: '[error-message] [context...]'
 ---
 
 # Debug Error Analysis

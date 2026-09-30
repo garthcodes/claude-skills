@@ -45,6 +45,32 @@ If the plan references a PRD (`.claude/prds/*.md`), read its **User Experience**
 (empty/loading/error/success) cover them. A PRD-specified state with no home in the plan is a
 gap to flag.
 
+Also read the **Acceptance Criteria contract** if one exists for the branch:
+`git branch --show-current`, strip `feature/`, look for
+`.claude/acceptance-criteria/<slug>.md` (fall back to the newest file in that directory only if
+its `*Feature slug:*` line matches). From its `## Contract` table
+(`| ID | Type | Criterion | Source | Priority | Verified by |`):
+
+- Every AC whose `Verified by` is `browser` or `browser+spec` needs a screen, flow, or state
+  in the plan where its *Then* clause would be visible. None → a gap (critical if Must).
+- Every UI element the plan describes (button, link, field, column, modal, tab, badge) must
+  serve some AC or PRD FR. An element nothing cites is an extra — flag it, don't admire it.
+- `guard` rows about UI ("no button/link/field with text X on /path") must not be
+  contradicted: a plan that adds the forbidden element is a blocker, however useful it seems.
+
+Report these in the `## Contract Fidelity` section of the review. If no contract file exists,
+say so there and rely on the PRD sections above.
+
+Also look for **design mockups** at `.claude/designs/<slug>/DESIGN.md` (same slug). Read only
+`DESIGN.md` — never the `.dc.html` artboards (visual reference for humans; their inline styles
+are not a source). Its `## Regions` table maps each screen region to a ViewComponent and its
+`## Copy inventory` lists every non-label string the design allows. Absent file → no design
+step ran: skip the Mockup Fidelity check, still run the Copy Discipline check against the
+plan alone.
+
+Read CLAUDE.md's **UI Copy Discipline** section — it is the standard for checklist item J and
+the `## Copy Audit` report section.
+
 ## Step 3: Front-End Review Checklist
 
 Evaluate the plan against these front-end specific criteria:
@@ -259,6 +285,46 @@ Evaluate the plan against these front-end specific criteria:
    - Is unnecessary JavaScript avoided (using Turbo instead)?
    - Are event listeners properly scoped?
    - Is DOM manipulation minimized?
+
+### J. Copy Discipline (MAJOR when violated)
+
+Generated UI tends to accumulate text nobody asked for. Hold the plan to CLAUDE.md's
+**UI Copy Discipline**:
+
+1. **Inventory completeness** — every visible string the plan's `## Frontend` describes that is
+   not a field label, column header, heading, button verb, value, or validation error appears in
+   the plan's `### Copy` table. A described hint, description, tooltip, banner, intro paragraph,
+   or empty-state sentence missing from the table is a finding.
+2. **Justification quality** — each `### Copy` row cites an AC/FR that names the text, an
+   always-allowed category (consent/legal/billing-disclosure/clinical-compliance, client-portal
+   `reassurance`, error messaging per `docs/ERROR_MESSAGING_GUIDE.md`), or a one-line reason a
+   label cannot carry the meaning (an unusual format, a non-obvious consequence). "Helps the
+   user", "for clarity", "friendly" are not reasons — mark the row **remove**.
+3. **Never-by-default list** — `PageHeaderComponent`/`FormSectionComponent` `description:`,
+   intro paragraphs, `TooltipComponent`/`HelpBubbleComponent` on standard controls, info
+   `AlertBoxComponent` explaining the feature, placeholders repeating the label, multi-sentence
+   empty states, reassurance lines. Any of these in the plan without an AC → **remove**.
+4. **Existing copy is out of scope** — do not recommend stripping text on screens that already
+   exist; the rule governs additions only.
+5. **Do not add** — never recommend a hint, description, or empty-state blurb the plan lacks.
+   "Are empty states planned?" (section A) asks for the *state*, one line; it is not a license
+   for copy.
+
+### K. Mockup Fidelity (only when `DESIGN.md` exists)
+
+The reviewer prompt states `Mockup fidelity: informational | enforced`. Compare the plan's
+`### Screens & Flows` / `### ViewComponents` against `DESIGN.md`'s `## Screens` / `## Regions`:
+
+1. Screen or state in DESIGN.md with no plan screen, or plan screen with no artboard (and not
+   listed under `## Not shown`) — report it.
+2. Region whose ViewComponent differs between plan and DESIGN.md — report it; the **plan wins**
+   on component choice (DESIGN.md's map is a suggestion until its Status is `refined`), so the
+   finding is "update DESIGN.md" unless the plan's choice breaks a component-reuse rule.
+3. Copy present in the plan but absent from DESIGN.md's inventory, or vice versa — report it.
+
+**informational** (Round 1, before Agent A has refined the mockups): list divergences in
+`## Mockup Fidelity`, no verdict impact. **enforced** (Round 2): unresolved divergences are
+MAJOR.
 
 ## Step 4: Generate Review Report
 
@@ -492,9 +558,58 @@ For each ambiguity, state the issue AND the default the plan should adopt:
 
 ---
 
+## Contract Fidelity
+
+*Contract: `.claude/acceptance-criteria/<slug>.md` (or "none found — PRD UX/FR check only")*
+
+### Browser ACs with no screen / flow / state in the plan
+| AC | Priority | Criterion (abridged) | What the plan is missing |
+|----|----------|----------------------|--------------------------|
+
+### UI elements no AC or FR asks for (extras)
+| Plan section | Element | AC or FR that would justify it |
+|--------------|---------|--------------------------------|
+
+### UI guard violations
+| AC (guard) | Asserted absence | Plan section that adds it |
+|------------|------------------|---------------------------|
+
+---
+
+## Copy Audit
+
+*Standard: CLAUDE.md "UI Copy Discipline". Scope: text the plan ADDS — existing screens' copy
+is not reviewed.*
+
+| String | Plan section / screen / region | Kind | Source AC or reason given | Verdict |
+|--------|--------------------------------|------|---------------------------|---------|
+[One row per non-label string the plan describes or lists in `### Copy`. Verdict: **keep**
+(AC-named, always-allowed category, or a reason a label cannot supply) · **remove** (no AC, no
+valid reason, or on the never-by-default list) · **missing from `### Copy`** (described in the
+plan but not inventoried — add or remove). Any **remove** or **missing** row is a MAJOR finding.
+"None — labels, values, and validation errors only" when the table is empty.]
+
+---
+
+## Mockup Fidelity
+
+*DESIGN.md: `.claude/designs/<slug>/DESIGN.md` (Status: draft | refined) · Mode: informational | enforced
+— or "no design mockups for this feature"*
+
+| Artboard / screen | DESIGN.md says | Plan says | Resolution |
+|-------------------|----------------|-----------|------------|
+[Screens, regions, or copy that differ. Resolution: "update DESIGN.md" (plan wins on
+components) · "add plan screen/state" · "add artboard or list under Not shown". Informational
+mode: no verdict impact. Enforced mode: unresolved rows are MAJOR.]
+
+---
+
 ## Final Verdict
 
 **Status**: FRONT-END READY | NEEDS SPECIFICATION | MAJOR GAPS
+
+[Copy Audit **remove**/**missing** rows and enforced-mode Mockup Fidelity rows are MAJOR
+findings → at least NEEDS SPECIFICATION, never BLOCKER on their own; BLOCKERS stay structural.]
 
 [Summary of what needs to happen before front-end implementation can begin]
 
@@ -514,6 +629,10 @@ For each ambiguity, state the issue AND the default the plan should adopt:
 6. **Leverage Hotwire**: Prefer Turbo over custom JavaScript
 7. **Reuse Components**: Check for existing components before suggesting new ones
 8. **Enforce Zero Custom CSS**: Flag any custom CSS in the plan
+9. **Less Copy, Not More**: Never recommend adding hints, descriptions, tooltips, banners, or
+   empty-state prose. Flag text the plan adds without an AC or a reason a label cannot supply
+10. **Mockups Are Reference**: `DESIGN.md` informs the review; `.dc.html` artboards are never
+    read, and inline styles from them are never acceptable in a plan
 
 ## Anti-Patterns to Flag
 
@@ -539,8 +658,10 @@ For each ambiguity, state the issue AND the default the plan should adopt:
 - **Unextracted UI sections** — distinct page sections (cards, list items, stat blocks, form sections) not planned as ViewComponents
 - **Loops rendering raw HTML** — each item in a loop should be rendered via a component
 - **Dates not in MM/DD/YYYY format** — ALL user-facing dates MUST be displayed as `MM/DD/YYYY`
+- **Inline `style=` attributes or literal hex/oklch colors copied from a design artboard** — mockups are reference; every visual is built with existing components and theme utilities
 
 ### HIGH PRIORITY
+- Unjustified UI copy (see `## Copy Audit`): `help_text:`, `description:`, tooltips, info banners, intro paragraphs, multi-sentence empty states, reassurance lines, placeholders repeating the label — MAJOR, not a blocker
 - Custom JavaScript where Turbo would suffice
 - Custom CSS instead of Tailwind utilities
 - Non-theme colors (arbitrary values like `bg-[#ff0000]`)

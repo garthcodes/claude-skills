@@ -8,7 +8,7 @@ Helper scripts and a hook that several skills assume exist. They're small and ge
 |---|---|---|
 | `bin/dev-url` | Prints the base URL of *this checkout's* dev server. Port precedence: `$PORT` > `PORT=` in `.env` > `3000`. Set `DEV_URL_HOST` / `DEV_URL_SCHEME` if your dev server lives at a custom host (e.g. `https://myapp.localhost`). | every Playwright-driving skill (`/bug-hunt`, `/execute-qa`, `/qa-tester`, `/full-qa`, …) |
 | `bin/worktree-port` | Allocates a free dev-server port (3010–3099) for a pipeline worktree under `.claude/worktrees/` and writes `PORT=<n>` into its `.env`. A port is free when no other worktree's `.env` claims it and nothing is listening on it. | `/build-feature`, `/fix-honeybadger`, `/worktree` |
-| `bin/worktree-sweep` | Removes pipeline worktrees whose PR is merged or closed: stops the server on the worktree's port, drops its `DATABASE_SUFFIX` databases, `git worktree remove`s it. Never touches open-PR, no-PR, dirty, or unregistered worktrees. `--dry-run` prints the verdicts only. Needs an authenticated `gh`. The database name prefix is read from `config/database.yml` (override with `APP_DB_PREFIX`). | `/worktree-sweep`, `/build-feature` (runs it first) |
+| `bin/worktree-sweep` | Removes **every** worktree of the repo except the main checkout — pipeline `.claude/worktrees/*` and sibling `../<app>-*` alike, plus stray dirs left under `.claude/worktrees/` — with no PR or dirty checks: stops the server on the worktree's own port, drops its `DATABASE_SUFFIX` databases, `git worktree remove --force`s it. Branches are never deleted. `--dry-run` prints `would remove` lines only. The database name prefix is read from `config/database.yml` (override with `APP_DB_PREFIX`). Run by hand only — it destroys in-flight worktrees. | `/worktree-sweep` (suggested by `/build-feature` when the port range is full) |
 
 Install:
 
@@ -20,7 +20,7 @@ cp tooling/bin/* /path/to/your-project/bin/
 
 ## `hooks/` — production guard
 
-`claude-hook-prod-guard.py` is a Claude Code **PreToolUse** hook for the `Bash` tool. Any command that targets production — `fly`/`flyctl` without an explicit staging target, `--app <prod-app>`, `bin/deploy` without `staging`, mutating `gcloud`/`gsutil`, a `production_reset` rake namespace — is turned into an explicit **ask** permission prompt, overriding any allowlist. Staging-targeted commands pass through. On any internal error it fails closed (asks).
+`claude-hook-prod-guard.py` is a Claude Code **PreToolUse** hook for the `Bash` tool. Any command that targets production — `fly`/`flyctl` without an explicit staging target, `--app <prod-app>`, `bin/deploy` without `staging`, mutating `gcloud`/`gsutil`, a `production_reset` rake namespace — is turned into an explicit **ask** permission prompt, overriding any allowlist. Staging-targeted commands pass through. On any internal error it fails closed (asks). The body of an inert `cat > file <<'EOF'` heredoc (quoted delimiter, output to a file) is not scanned, so writing a plan or PR body that quotes a deploy command doesn't prompt; every other heredoc stays guarded.
 
 The ops skills (`devops-expert`, `feature-qa`, `impact-assessment`, `fix-honeybadger`, `sync-user-docs`) refer to this hook as the enforcement layer behind their "never act on production automatically" rule.
 

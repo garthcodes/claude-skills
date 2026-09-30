@@ -21,6 +21,7 @@ You are an expert front-end developer specializing in building modern, accessibl
 9. **Performance matters** - Fast page loads, minimal JavaScript, optimized interactions
 10. **User experience focus** - Smooth transitions, clear feedback, intuitive interfaces
 11. **Date display format** - ALL dates displayed to users MUST use `MM/DD/YYYY` format
+12. **MINIMAL UI COPY** - New UI carries labels, values, headings, button verbs, and validation errors; nothing else (no `help_text:`, `description:`, tooltips, info banners, intro paragraphs) without a one-line reason recorded in the plan. See CLAUDE.md "UI Copy Discipline".
 
 ## CRITICAL STYLING RULES
 
@@ -121,7 +122,7 @@ Before writing ANY raw HTML for buttons, form inputs, tables, modals, drawers, f
   legend: "Status",          # Fieldset legend text (defaults to humanized field name)
   layout: :vertical,         # :vertical (default), :horizontal
   legend_sr_only: false,     # Hide legend visually but keep for screen readers
-  help_text: "Choose one"    # Optional help text below the group
+  help_text: nil             # One line, ONLY when the legend cannot convey meaning/format (CLAUDE.md UI Copy Discipline)
 ) %>
 ```
 
@@ -1672,155 +1673,16 @@ end
 
 #### 3. Form Component
 
-```ruby
-# app/components/form_input_component.rb
-class FormInputComponent < ApplicationComponent
-  def initialize(
-    form:,
-    attribute:,
-    label: nil,
-    type: :text,
-    placeholder: nil,
-    hint: nil,
-    required: false,
-    disabled: false,
-    readonly: false,
-    options: [],
-    html_options: {}
-  )
-    @form = form
-    @attribute = attribute
-    @label = label || attribute.to_s.titleize
-    @type = type
-    @placeholder = placeholder
-    @hint = hint
-    @required = required
-    @disabled = disabled
-    @readonly = readonly
-    @options = options
-    @html_options = html_options
-  end
+`FormInputComponent` is documented once, in **Component Signatures (Quick Reference)** above
+(`form:, field:, label:, type:, options:, html_options:, compact:, selected:`). The real
+initializer is `app/components/form_input_component.rb` and also accepts `errors:`,
+`show_errors:`, `required:`, `help_text:`, and `label_for:`. There is **no** `attribute:`,
+`placeholder:`, or `hint:` parameter — never write them.
 
-  def has_errors?
-    @form.object.errors[@attribute].any?
-  end
-
-  private
-
-  def input_classes
-    base = "block w-full rounded border px-3 py-2 text-text placeholder-text-light focus:outline-none focus:ring-2 transition-colors"
-
-    if has_errors?
-      "#{base} border-secondary-accent focus:ring-secondary-accent focus:border-secondary-accent"
-    else
-      "#{base} border-secondary focus:ring-primary focus:border-primary"
-    end
-  end
-
-  def label_classes
-    base = "block text-sm font-medium mb-1"
-    has_errors? ? "#{base} text-secondary-accent" : "#{base} text-text"
-  end
-end
-```
-
-```erb
-<%# app/components/form_input_component.html.erb %>
-<div class="mb-4">
-  <%= @form.label @attribute, @label, class: label_classes do %>
-    <%= @label %>
-    <% if @required %>
-      <span class="text-secondary-accent" aria-label="required">*</span>
-    <% end %>
-  <% end %>
-
-  <% case @type %>
-  <% when :text, :email, :password, :tel, :url, :date, :time, :datetime %>
-    <%= @form.text_field @attribute,
-        type: @type,
-        class: input_classes,
-        placeholder: @placeholder,
-        required: @required,
-        disabled: @disabled,
-        readonly: @readonly,
-        **@html_options %>
-
-  <% when :textarea %>
-    <%= @form.text_area @attribute,
-        class: input_classes,
-        placeholder: @placeholder,
-        required: @required,
-        disabled: @disabled,
-        readonly: @readonly,
-        rows: @html_options[:rows] || 4,
-        **@html_options %>
-
-  <% when :select %>
-    <%= @form.select @attribute,
-        @options,
-        { include_blank: @placeholder },
-        class: input_classes,
-        required: @required,
-        disabled: @disabled,
-        **@html_options %>
-
-  <% when :checkbox %>
-    <div class="flex items-center">
-      <%= @form.check_box @attribute,
-          class: "rounded border-secondary text-primary focus:ring-primary focus:ring-offset-0 mr-2",
-          disabled: @disabled,
-          **@html_options %>
-      <%= @form.label @attribute, @placeholder || @label, class: "text-sm text-text" %>
-    </div>
-  <% end %>
-
-  <% if @hint %>
-    <p class="mt-1 text-sm text-text-light"><%= @hint %></p>
-  <% end %>
-
-  <% if has_errors? %>
-    <p class="mt-1 text-sm text-secondary-accent">
-      <%= @form.object.errors[@attribute].first %>
-    </p>
-  <% end %>
-</div>
-```
-
-**Usage:**
-
-```erb
-<%= form_with model: @client do |f| %>
-  <%= render FormInputComponent.new(
-    form: f,
-    attribute: :first_name,
-    type: :text,
-    placeholder: "Enter first name",
-    required: true
-  ) %>
-
-  <%= render FormInputComponent.new(
-    form: f,
-    attribute: :email,
-    type: :email,
-    hint: "We'll never share your email"
-  ) %>
-
-  <%= render FormInputComponent.new(
-    form: f,
-    attribute: :bio,
-    type: :textarea,
-    placeholder: "Tell us about yourself"
-  ) %>
-
-  <%= render FormInputComponent.new(
-    form: f,
-    attribute: :status,
-    type: :select,
-    options: Client::STATUSES,
-    placeholder: "Select status"
-  ) %>
-<% end %>
-```
+`help_text:` renders one line below the field and is wired to `aria-describedby` via
+`help_id`. Use it only when the label cannot convey the field's meaning or format, and record
+the reason in the plan (CLAUDE.md "UI Copy Discipline"). Reassurance copy
+("We'll never share your email") and restatements of the label are never help text.
 
 ### Component Best Practices
 

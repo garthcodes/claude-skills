@@ -1,3 +1,8 @@
+---
+name: review-rails
+description: Review the current branch for code quality, security, and Rails 8 conventions compliance
+---
+
 # review-rails
 
 Review the current branch for code quality, security, and Rails 8 conventions compliance.

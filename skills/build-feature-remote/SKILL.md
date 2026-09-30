@@ -50,6 +50,14 @@ git log origin/main..HEAD -- "${PRD_PATH}"
   first rather than forcing anything.
 - Tell the user what you committed/pushed, if anything.
 
+**Acceptance-criteria contract:** check whether `.claude/acceptance-criteria/${FEATURE_NAME}.md`
+exists locally. If it does, run the same status check on it and commit/push it alongside the
+PRD (same docs-only commit is fine: `docs: add PRD + acceptance criteria for cloud build
+(${FEATURE_NAME})`) — the remote `/build-feature` gates on this file, so a reviewed contract
+left unpushed would be silently regenerated unreviewed. If it does not exist, note to the user
+that the remote `/build-feature` will generate it (`/acceptance-criteria`) and review it
+(`/review-acceptance-criteria`) itself before planning.
+
 ## Step 3: Compose the remote prompt
 
 The cloud agent starts with zero conversation context, so the prompt must be fully
@@ -124,8 +132,9 @@ skill; that's the whole point of it (use `/build-feature` locally, or the plain 
 skill, for other models).
 
 `Task`, `Agent`, and `Workflow` are included in `allowed_tools` because `/build-feature`
-launches its own sub-agents internally (three sequential phase agents sharing one worktree —
-the first is worktree-isolated, the other two work in that same worktree).
+launches its own sub-agents internally (nine sequential phase agents sharing one worktree — the
+first is worktree-isolated, the rest work in that same worktree — plus Sonnet implementation workers
+launched by the implement/review/trace agents).
 
 ## Step 5: Report back
 

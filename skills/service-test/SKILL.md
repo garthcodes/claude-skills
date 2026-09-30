@@ -1,3 +1,8 @@
+---
+name: service-test
+description: Generate RSpec tests for a service object following the application's patterns
+---
+
 # Service Test Generator Command
 
 You are an expert Rails service test developer. Write comprehensive, fast, and maintainable RSpec service tests for the application following established patterns and best practices.

@@ -1,6 +1,6 @@
 ---
 description: Orchestrate parallel test generation for all changed components, jobs, models, policies, and services in the current branch. Native replacement for scripts/test-changed-all.sh.
-argument-hint: [options] [base-branch]
+argument-hint: '[options] [base-branch]'
 ---
 
 # Test Changed — Parallel Test Coverage Orchestrator

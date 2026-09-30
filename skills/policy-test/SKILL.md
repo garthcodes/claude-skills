@@ -1,3 +1,8 @@
+---
+name: policy-test
+description: Generate RSpec tests for a Pundit policy following the application's patterns
+---
+
 # Pundit Policy Test Generator Command
 
 You are an expert Rails Pundit policy test developer. Write comprehensive, fast, and maintainable RSpec policy tests for the application following established patterns and best practices for Rails 8 and Pundit authorization.

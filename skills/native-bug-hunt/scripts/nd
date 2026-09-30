@@ -1,0 +1,168 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# nd -- drive the Ruby Native preview app on the Android emulator and talk to
+# the dev-only debug beacon (lib/dev/native_debug_middleware.rb +
+# app/javascript/native_debug.js). Used by the /native-bug-hunt skill.
+#
+#   nd eval '<js>'            run JS in the current page (use `return`), print the result
+#   nd tap '<selector>' [n]   tap the nth (default 0) visible element matching a CSS selector
+#   nd tapxy X Y              tap device pixels
+#   nd type '<text>'          type into the focused field
+#   nd key <name|code>        back, enter, escape (hides keyboard), or a keycode
+#   nd shot <path>            screenshot to a PNG
+#   nd native                 native chrome (tab bar, navbar, dialogs) from uiautomator
+#   nd layout                 layout snapshot, including offscreen interactive elements
+#   nd log [n]                last n beacon entries + non-asset request lines (default 20)
+#   nd url <tunnel-url>       put a URL on the emulator clipboard (for Paste URL)
+#   nd relaunch               force-stop and relaunch the app
+
+require "json"
+require "fileutils"
+require "open3"
+
+APP = "com.rubynative.demo"
+ROOT = `git rev-parse --show-toplevel`.strip
+DIR = File.join(ROOT, "tmp/native_debug")
+COMMAND = File.join(DIR, "command.js")
+RESULT = File.join(DIR, "result.json")
+TIMEOUT = 10
+
+def adb(*args)
+  out, status = Open3.capture2e("adb", *args)
+  abort "adb #{args.join(" ")} failed:\n#{out}" unless status.success?
+  out
+end
+
+def js_eval(source)
+  FileUtils.mkdir_p(DIR)
+  FileUtils.rm_f(RESULT)
+  File.write(COMMAND, source)
+  deadline = Time.now + TIMEOUT
+  until File.exist?(RESULT)
+    if Time.now > deadline
+      FileUtils.rm_f(COMMAND)
+      abort "No result after #{TIMEOUT}s. Is the app open on an app page, signed in, " \
+            "with the dev server restarted since the beacon was added?"
+    end
+    sleep 0.2
+  end
+  result = JSON.parse(File.read(RESULT))
+  File.delete(RESULT)
+  abort "JS error: #{result["error"]}" unless result["ok"]
+  result["value"]
+end
+
+def ui_nodes
+  adb("shell", "uiautomator", "dump", "/sdcard/nd.xml")
+  xml = adb("shell", "cat", "/sdcard/nd.xml")
+  xml.scan(/<node [^>]*>/).map do |node|
+    attrs = node.scan(/([\w-]+)="([^"]*)"/).to_h
+    bounds = attrs["bounds"].to_s.scan(/\d+/).map(&:to_i)
+    attrs.merge("box" => bounds)
+  end
+end
+
+def webview_box
+  node = ui_nodes.find { |n| n["class"] == "android.webkit.WebView" && n["box"].size == 4 }
+  abort "No WebView on screen (native screen or dialog showing?). Run `nd native`." unless node
+  node["box"]
+end
+
+def tap(x, y)
+  adb("shell", "input", "tap", x.round.to_s, y.round.to_s)
+  puts "tapped #{x.round},#{y.round}"
+end
+
+def key(name)
+  code = {"back" => 4, "enter" => 66, "escape" => 111, "tab" => 61}.fetch(name, name)
+  adb("shell", "input", "keyevent", code.to_s)
+end
+
+def type_text(text)
+  escaped = text.gsub(/([\\'"`$&|;<>()*~?!#])/) { "\\#{$1}" }.gsub(" ", "%s")
+  adb("shell", "input", "text", escaped)
+end
+
+cmd, *args = ARGV
+case cmd
+when "eval"
+  puts JSON.pretty_generate(js_eval(args.fetch(0)))
+when "tap"
+  selector = args.fetch(0)
+  index = (args[1] || 0).to_i
+  found = js_eval("return { dpr: devicePixelRatio, els: __nativeDebug.rects(#{selector.to_json}) }")
+  el = found["els"][index] or abort "No visible element ##{index} for #{selector} " \
+                                    "(#{found["els"].size} found)"
+  left, top = webview_box
+  r = el["rect"]
+  puts "#{el["tag"]} #{el["text"].inspect}"
+  tap(left + (r["x"] + r["w"] / 2.0) * found["dpr"], top + (r["y"] + r["h"] / 2.0) * found["dpr"])
+when "tapxy"
+  tap(args.fetch(0).to_i, args.fetch(1).to_i)
+when "type"
+  type_text(args.fetch(0))
+when "key"
+  key(args.fetch(0))
+when "shot"
+  path = args.fetch(0)
+  FileUtils.mkdir_p(File.dirname(path))
+  png, status = Open3.capture2("adb", "exec-out", "screencap", "-p", binmode: true)
+  abort "screencap failed" unless status.success?
+  File.binwrite(path, png)
+  puts path
+when "native"
+  ui_nodes.each do |n|
+    label = [n["text"], n["content-desc"]].reject { |v| v.to_s.empty? }.join(" | ")
+    next if label.empty?
+    flags = %w[clickable selected].select { |f| n[f] == "true" }
+    puts "#{label.ljust(40)} #{n["box"].inspect} #{flags.join(",")}"
+  end
+when "layout"
+  puts JSON.pretty_generate(js_eval("return __nativeDebug.layout()"))
+when "log"
+  count = (args[0] || 20).to_i
+  beacon = File.join(ROOT, "log/native_debug.log")
+  puts "== beacon (#{beacon})"
+  entries = File.exist?(beacon) ? File.readlines(beacon).last(count) : []
+  puts "(empty)" if entries.empty?
+  entries.each do |line|
+    e = JSON.parse(line)
+    r = e["report"]
+    detail =
+      case r["type"]
+      when "layout"
+        hidden = r["offscreenInteractive"].map { |d| "#{d["tag"]} #{d["text"].tr("\n", " ").inspect} y=#{d["rect"]["y"]}+#{d["rect"]["h"]}" }
+        "vh=#{r["innerHeight"]} safe=#{r["safeAreaTop"]}/#{r["safeAreaBottom"]} offscreen=[#{hidden.join(", ")}]"
+      else "#{r["level"]} #{r["message"]} #{r["source"]}".strip
+      end
+    puts "#{e["at"][11, 12]} #{e["platform"]} #{r["type"].ljust(7)} #{r["url"]}  #{detail}"
+  end
+  puts "== requests"
+  dev_log = File.join(ROOT, "log/development.log")
+  lines = `tail -n 20000 #{dev_log.inspect}`.scrub.lines
+  puts lines.grep(/^(Started|Completed)/).grep_v(%r{/assets/|/cable|/__native_debug/}).last(count)
+when "url"
+  url = args.fetch(0)
+  adb("shell", "am", "start", "-n", "com.android.chrome/com.google.android.apps.chrome.Main",
+    "-a", "android.intent.action.VIEW", "-d", "about:blank")
+  sleep 3
+  bar = ui_nodes.find { |n| n["resource-id"].to_s.match?(/url_bar|search_box_text/) }
+  abort "Chrome's address bar not found (first-run screen?). Dismiss it and retry." unless bar
+  x1, y1, x2, y2 = bar["box"]
+  tap((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+  sleep 1
+  type_text(url)
+  adb("shell", "input", "keycombination", "113", "29") # Ctrl+A
+  adb("shell", "input", "keycombination", "113", "31") # Ctrl+C
+  key("escape")
+  adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+  puts "Copied. Ruby Native is in front: tap Paste URL (`nd native` shows its bounds)."
+when "relaunch"
+  adb("shell", "am", "force-stop", APP)
+  adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+  puts "relaunched #{APP}"
+else
+  puts File.read(__FILE__).lines.drop(3).take_while { |l| l.start_with?("#") }.join
+  exit(cmd.nil? ? 0 : 1)
+end

@@ -51,9 +51,52 @@ GSUTIL_MUTATING = re.compile(
     r"\b(?:rm|cp|mv|rsync|setmeta|setacl|defacl|ch|mb|rb|compose|rewrite|retention)\b"
 )
 
+# `cat > file <<'EOF'` / `cat <<'EOF' > file` with a QUOTED delimiter: the shell does no expansion and
+# nothing executes the body — it is inert text written to a file (plans, docs, PR bodies that quote
+# deploy commands). Only that exact shape is exempt. Unquoted delimiters (they expand $(...)),
+# heredocs piped anywhere, $(cat <<'X' ...) substitutions, and interpreter heredocs
+# (`python3 - <<'EOF'`) stay fully guarded.
+INERT_HEREDOC = re.compile(
+    r"(?:^|[;&]\s*)cat"
+    r"(?:\s+>>?\s*(?P<out1>[^\s|;&<>()]+))?"
+    r"\s+<<-?\s*(?P<q>['\"])(?P<tag>\w+)(?P=q)"
+    r"(?:\s*>>?\s*(?P<out2>[^\s|;&<>()]+))?\s*$"
+)
+
+ANY_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
+def strip_inert_heredoc_bodies(command):
+    """Drop the bodies of top-level inert `cat > file <<'EOF'` heredocs; every other line is checked."""
+    lines = command.split("\n")
+    if any(line.count("<<") > 1 for line in lines):
+        return command  # several heredocs on one line: don't try to be clever
+    kept, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        kept.append(line)
+        inert = INERT_HEREDOC.search(line)
+        other = ANY_HEREDOC.search(line)
+        if inert and (inert.group("out1") or inert.group("out2")):
+            tag, drop = inert.group("tag"), True
+        elif other:
+            tag, drop = other.group(2), False  # any other heredoc: keep its body, never look inside it
+        else:
+            i += 1
+            continue
+        i += 1
+        while i < len(lines) and lines[i].strip() != tag:
+            if not drop:
+                kept.append(lines[i])
+            i += 1
+        if i < len(lines):
+            kept.append(lines[i])
+        i += 1
+    return "\n".join(kept)
+
 
 def production_reason(command):
     """Return a short reason string if the command targets production, else None."""
+    command = strip_inert_heredoc_bodies(command)
     if PROD_APP_FLAG.search(command):
         return f"targets Fly app {PROD_APP}"
     if PRODUCTION_RESET.search(command):

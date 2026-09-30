@@ -51,7 +51,7 @@ find_free() {
     echo "$p"
     return 0
   done
-  echo "No free port in ${RANGE_START}–${RANGE_END} for pipeline worktrees — run /worktree-sweep to remove merged/closed worktrees" >&2
+  echo "No free port in ${RANGE_START}–${RANGE_END} for pipeline worktrees — run /worktree-sweep to remove all worktrees" >&2
   return 1
 }
 
