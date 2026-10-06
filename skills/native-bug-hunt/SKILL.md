@@ -30,6 +30,17 @@ Only staff messaging renders natively (`NativeMode::NATIVE_STAFF_PATHS` in
 `app/controllers/concerns/native_mode.rb`); any other page shows the **Open in browser** screen.
 Plan scope with that in mind.
 
+## Start with the scripted shell pass
+
+`bin/native-qa` does the whole Android setup and shell checklist unattended (boot, tunnel, Paste
+URL, sign-in, tabs, badge, navbar, sheets, cross-tab links, Open in browser, relaunch) and writes
+`docs/bug-reports/native-qa-<timestamp>/REPORT.md`. Ask the user to run it in their own terminal
+(it starts the tunnel, which auto mode blocks for Claude) and paste the report path, or use the
+newest `docs/bug-reports/native-qa-*/REPORT.md` if one is from today. Triage it first: every FAIL
+row is a bug to write up with its screenshot (Type per **Native Bug Types** below); a WARN row is
+something the script could not decide — check it by hand in the per-screen pass. Then hunt the
+feature below the same way, driving the emulator yourself for anything the script does not cover.
+
 ## Scope Determination
 
 Follow **Scope Determination** (Mode A / Mode B) in `.claude/skills/bug-hunt/SKILL.md` exactly,

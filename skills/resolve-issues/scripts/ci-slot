@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# The one bin/ci slot on this machine, shared by /resolve-issues sub-agents and
+# standalone /resolve-issue runs. CLAUDE.md allows one bin/ci at a time; builds
+# may overlap, CI may not.
+#
+# Usage: ci-slot acquire <issue>   # block until the slot is ours, then until no foreign bin/ci runs
+#        ci-slot release <issue>   # free the slot if <issue> holds it (no-op otherwise)
+#        ci-slot status            # print the holder and how long it has held the slot
+#
+# The slot is a directory (mkdir is atomic) rather than a lockf lock, because it
+# is held across several tool calls: bin/ci -> /green-ci -> bin/ci again.
+# A slot held longer than STALE_SECS is assumed abandoned (crashed agent) and taken over.
+set -euo pipefail
+
+MAIN_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+SLOT="$MAIN_DIR/tmp/resolve-issues-ci.slot"
+STALE_SECS=$((3 * 3600))
+POLL_SECS=30
+
+usage() {
+  echo "Usage: ci-slot acquire <issue> | release <issue> | status" >&2
+  exit 2
+}
+
+owner() { cat "$SLOT/owner" 2>/dev/null | cut -d' ' -f1; }
+age() {
+  local since
+  since="$(cut -d' ' -f2 "$SLOT/owner" 2>/dev/null || true)"
+  [ -n "$since" ] && echo $(($(date +%s) - since)) || echo 0
+}
+
+acquire() {
+  local issue="$1" started waited
+  started="$(date +%s)"
+  mkdir -p "$MAIN_DIR/tmp"
+  while true; do
+    if mkdir "$SLOT" 2>/dev/null; then
+      echo "$issue $(date +%s) $PWD" > "$SLOT/owner"
+      break
+    fi
+    if [ "$(owner)" = "$issue" ]; then
+      break
+    fi
+    if [ "$(age)" -gt "$STALE_SECS" ]; then
+      echo "ci-slot: taking over from #$(owner), held $(($(age) / 60)) min" >&2
+      rm -rf "$SLOT"
+      continue
+    fi
+    sleep "$POLL_SECS"
+  done
+  # Another session may be running bin/ci outside this slot. c[i] keeps pgrep off its own pattern.
+  while pgrep -f 'ruby bin/c[i]' >/dev/null; do sleep "$POLL_SECS"; done
+  waited=$((($(date +%s) - started) / 60))
+  echo "ci-slot: #$issue holds the slot (waited ${waited} min)"
+}
+
+release() {
+  local issue="$1"
+  if [ "$(owner)" = "$issue" ]; then
+    rm -rf "$SLOT"
+    echo "ci-slot: #$issue released"
+  else
+    local holder
+    holder="$(owner)"
+    echo "ci-slot: #$issue does not hold the slot (holder: ${holder:-none})"
+  fi
+}
+
+case "${1:-}" in
+  acquire) [ -n "${2:-}" ] || usage; acquire "${2#\#}" ;;
+  release) [ -n "${2:-}" ] || usage; release "${2#\#}" ;;
+  status)
+    if [ -d "$SLOT" ]; then
+      echo "held by #$(owner) for $(($(age) / 60)) min"
+    else
+      echo "free"
+    fi
+    ;;
+  *) usage ;;
+esac

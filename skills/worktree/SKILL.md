@@ -148,7 +148,7 @@ After successful creation:
   collides with it. To run one alongside it, assign a port with
   `bin/worktree-port --assign .env` (writes `PORT=<n>` in the 3010–3099 range; `bin/dev`
   honors it, and `bin/dev-url` reports the resulting base URL for the QA/bug-hunt skills).
-  `/worktree-sweep` removes these `../<app>-*` worktrees too (along with every other worktree)
+  `/worktree-sweep` removes these `../<app>-*` worktrees too once nothing in them is worth keeping
 
 ## Example Usage
 

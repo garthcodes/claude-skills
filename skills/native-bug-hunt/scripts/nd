@@ -11,7 +11,8 @@
 #   nd type '<text>'          type into the focused field
 #   nd key <name|code>        back, enter, escape (hides keyboard), or a keycode
 #   nd shot <path>            screenshot to a PNG
-#   nd native                 native chrome (tab bar, navbar, dialogs) from uiautomator
+#   nd native [--json]        native chrome (tab bar, navbar, dialogs) from uiautomator; --json = every node
+#   nd webview                the WebView's device-pixel box as JSON [x1, y1, x2, y2]
 #   nd layout                 layout snapshot, including offscreen interactive elements
 #   nd log [n]                last n beacon entries + non-asset request lines (default 20)
 #   nd url <tunnel-url>       put a URL on the emulator clipboard (for Paste URL)
@@ -112,12 +113,18 @@ when "shot"
   File.binwrite(path, png)
   puts path
 when "native"
+  if args[0] == "--json"
+    puts JSON.generate(ui_nodes)
+    exit
+  end
   ui_nodes.each do |n|
     label = [n["text"], n["content-desc"]].reject { |v| v.to_s.empty? }.join(" | ")
     next if label.empty?
     flags = %w[clickable selected].select { |f| n[f] == "true" }
     puts "#{label.ljust(40)} #{n["box"].inspect} #{flags.join(",")}"
   end
+when "webview"
+  puts webview_box.to_json
 when "layout"
   puts JSON.pretty_generate(js_eval("return __nativeDebug.layout()"))
 when "log"

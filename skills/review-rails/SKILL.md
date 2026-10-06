@@ -68,10 +68,10 @@ When invoked, you should:
 
 4. **Check against Rails 8 conventions**:
 
-   **Service Objects** (`app/services/`):
-   - Named with `VerbNounService` pattern
-   - Uses `Result` object for success/failure handling
-   - Accepts domain object in constructor
+   **Service Objects** (`app/services/`, rules in `app/services/CLAUDE.md`):
+   - New services: noun named for the process, verb instance methods taking their arguments directly; flag new `def call`, `def self.call`, `include Callable`, or constructor-injected dependencies (P1)
+   - A substantially changed `Callable` service should be converted to the new shape (P0 suggestion)
+   - Every public method returns a `Result`, never a boolean or a bare model
    - Handles errors within service, returns user-friendly messages
    - Has corresponding RSpec tests
 
@@ -89,21 +89,41 @@ When invoked, you should:
    - Uses strong parameters for all user input
    - Supports appropriate response formats (HTML/JSON/Turbo Stream)
    - Has controller specs or system tests
+   - New routes: a new action is a new resource (no new `member`/`collection` routes); `only:`, never `except:`
+   - One main instance variable per action, named after the resource
+   - Params converted to real types before the service call
+   - New JSON APIs versioned under `/api/v1` with a top-level root key
 
    **Models** (`app/models/`):
    - Uses UUID for primary keys (check migrations)
    - Has validations for all required fields
    - Uses ActiveRecord validations (not custom validation methods)
    - Uses scopes for complex queries
-   - Uses enums for status/categorical fields
+   - Uses enums for status/categorical fields (explicit integer hash, backed by a check constraint)
    - Has comprehensive model specs with FactoryBot
+   - No new side-effect callbacks (mail, jobs, broadcasts, API calls, writes to other models); those go in a service (P1; P2 when a network call runs in a `before_*`/`after_save` callback inside the transaction)
+   - No new business logic added to `Appointment`, `Invoice`, `Client` or `User`; logic that's changed there should move to a service (P1)
+   - Formatting values before save uses `normalizes`, not `before_validation`/`before_save`
 
    **Migrations** (`db/migrate/`):
    - CLI-generated (not hand-written)
    - Uses UUID for primary keys (`id: :uuid`)
    - Has appropriate indexes for queried columns
-   - Has database constraints in addition to model validations
+   - Has database constraints in addition to model validations: `null: false`, foreign keys, a unique index behind every uniqueness validation, check constraints for ranges and enums
+   - New constraints on existing tables account for prod rows that already break them
    - Is reversible
+
+   **Jobs** (`app/jobs/`):
+   - Arguments are IDs/scalars only; `find_by` + early return when the record is gone
+   - No business logic: delegates to a service and raises on a failed Result
+   - Safe to run twice (no double charge, send or submit on retry)
+
+   **Views** (`app/views/`):
+   - New or edited partials declare strict locals (`<%# locals: (...) %>`)
+   - Semantic HTML; `div`/`span` only for layout
+
+   **Config**:
+   - New ENV reads use `ENV.fetch`; a required variable is set in every environment
 
    **JavaScript/Stimulus** (`app/javascript/controllers/`):
    - Stimulus controllers only (no jQuery)

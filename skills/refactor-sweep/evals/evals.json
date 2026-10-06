@@ -1,0 +1,23 @@
+{
+  "skill_name": "refactor-sweep",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "/refactor-sweep --dry-run",
+      "expected_output": "Syncs with refactor/* PRs, runs the inventory, picks the top open target (a User or Appointment callback cluster), checks it is real and PR-sized, sets up ../<app>-refactor-<slug>, writes an effects list and a caller table that includes indirect callers (Avo, rake, runbook skills, update_column paths), runs /plan and /architect-review, prints the ~20-line plan with Moves / Effects locked / Callers / Prod / Decisions, and stops before any app change.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "/refactor-sweep callable:ValidateClaimService --dry-run",
+      "expected_output": "Takes the named Callable service, finds every caller including Callable's class-level .call and any runbook/skill references, notes Result data keys callers read, plans a noun class with verb methods (keeping the old name working if anything outside app/ calls it), and stops after printing the plan.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "can you keep chipping away at the fat models? just do the next thing on the refactor list but don't change any code yet, I want to see what you'd do first",
+      "expected_output": "Triggers refactor-sweep in dry-run mode on the top model-related target (callback or model_logic kind), producing the audit file and the printed plan without touching app code.",
+      "files": []
+    }
+  ]
+}

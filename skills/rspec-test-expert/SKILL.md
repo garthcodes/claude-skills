@@ -1,912 +1,109 @@
 ---
 name: rspec-test-expert
-description: Expert at writing reliable, comprehensive RSpec tests for Rails models, services, and controllers. Use when user asks to write unit tests, model tests, service tests, fix test failures, or improve test coverage. Specializes in Rails testing patterns with FactoryBot, shoulda-matchers, and service object testing.
+description: Write, review, trim, and fix RSpec unit tests in a Rails app (models, services, jobs, mailers, helpers, lib, rake tasks, channels, initializers) so they test the code for real, with no padding. Owns the shared test-quality yardstick (test-quality.md) plus the coverage and mutation-probe scripts the other test skills use. Use whenever the user asks to write unit tests, add specs, improve or clean up existing specs, says tests are bloated, slow, or "not really testing anything", wants to know whether a spec actually catches bugs, or needs a failing unit spec fixed, even if they don't say "RSpec".
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep]
 ---
 
 # RSpec Test Expert
 
-You are an expert software engineer specializing in writing rock-solid RSpec tests for Rails applications. You write tests that are comprehensive, maintainable, and follow industry best practices.
+You write and review the app's unit specs. The goal is the smallest spec that **fails for every
+behavior that matters** and **stays green through refactors that keep that behavior**. Coverage
+counts and example counts are not the goal; this suite already has plenty of both and still lets
+bugs through.
 
-## Core Principles
+**Read `test-quality.md` (next to this file) before you write or change a spec.** It is the shared
+yardstick: the fat catalogue, what "real" means, setup facts (tenant, roles, SoftDeletable),
+the coverage and probe proof, concurrency-safe spec runs, and the review workflow. This file only
+adds what is specific to the spec types routed here.
 
-1. **Test behavior, not implementation** - Focus on what the code does, not how it does it
-2. **Tests should be clear and descriptive** - Anyone should understand what's being tested
-3. **One assertion per test** - Each test should verify one specific behavior
-4. **Arrange-Act-Assert (AAA) pattern** - Clear test structure: setup → execute → verify
-5. **DRY but not too DRY** - Shared setup is good, but tests should be readable
-6. **Fast and deterministic** - Tests must run quickly and produce consistent results
+Specialist skills exist for models (`model-test`), services (`service-test`), policies
+(`policy-test`) and components (`viewcomponent-test-expert`). If you were invoked for one of those
+types, read that skill too. Jobs, mailers, helpers, lib, rake tasks, channels and initializers are
+handled here.
 
-## Technology Stack Context
+## Two modes
 
-This is a Rails 8 application with:
-- **Rails 8.0.2** with Ruby 3.3.5
-- **PostgreSQL** with UUID primary keys
-- **RSpec Rails** for testing framework
-- **FactoryBot** for test data creation
-- **Shoulda Matchers** for common Rails validations/associations
-- **Multi-tenancy** via ActsAsTenant
-- **Service Objects** returning Result objects
-- **Pundit** for authorization
-- **ViewComponents** for UI components
+- **Write**: no spec exists, or the user asked for new examples. Read the source, list its
+  behaviors, write one example per behavior or decision, then prove it (coverage plus probes).
+- **Review**: a spec exists and the user wants it improved, trimmed, or checked. Follow the review
+  workflow in `test-quality.md`, steps 1–8. The rewrite is often shorter than the original. That
+  is the point, provided `lost_lines` is empty and the probes are killed.
 
-## Test File Structure
+In both modes:
 
-```ruby
-require 'rails_helper'
+- run specs with your own `TEST_ENV_NUMBER` (2–9; see `test-quality.md`);
+- never edit application code, and log suspected bugs as findings;
+- don't commit unless the caller asks (the `/spec-sweep` orchestrator commits batches itself).
 
-RSpec.describe ModelOrService, type: :model do  # or :service, :controller
-  # Setup - Use let/let! for test data
-  let(:organization) { create(:organization) }
-  let(:model) { build(:model, organization: organization) }
+## Spec-type notes
 
-  # Organize tests by category
-  describe 'validations' do
-    # Group related validations
-  end
+### Jobs (`spec/jobs`)
 
-  describe 'associations' do
-    # Test relationships
-  end
+A job is a thin adapter: arguments in, a service call or side effect out, plus retry/discard
+policy. Test:
 
-  describe 'callbacks' do
-    # Test lifecycle hooks
-  end
+- `perform_now` with real records produces the side effect, or calls the service with the right
+  arguments when the service has its own spec (that is the boundary; stubbing it here is fine);
+- early returns (record missing or soft-deleted, already processed): assert nothing happens;
+- `retry_on`/`discard_on`: assert behavior for the exception class that matters
+  (`perform_enqueued_jobs` plus `assert_performed_jobs`, or call `perform_now` and check the
+  discard side effect), not the declaration;
+- `honeybadger_context` for jobs with PHI arguments: assert it omits the PHI.
 
-  describe 'scopes' do
-    # Test query methods
-  end
+Don't test `queue_as` or `perform_later` enqueuing itself (Rails), or that `ApplicationJob` is the
+superclass.
 
-  describe 'class methods' do
-    describe '.method_name' do
-      # Test class methods
-    end
-  end
+### Mailers (`spec/mailers`)
 
-  describe 'instance methods' do
-    describe '#method_name' do
-      context 'when condition is true' do
-        it 'returns expected result' do
-          # Test implementation
-        end
-      end
+Assert what the recipient gets: `to`, `subject`, key body text in **both** the HTML and text
+parts, org branding present (the layout must be used, per CLAUDE.md), links pointing at the right
+host and path, and no PHI where it is forbidden. One example per email action plus one per
+conditional section. Don't snapshot whole bodies.
 
-      context 'when condition is false' do
-        it 'handles edge case correctly' do
-          # Test implementation
-        end
-      end
-    end
-  end
+### Helpers (`spec/helpers`)
 
-  describe 'edge cases' do
-    # Test boundary conditions
-  end
-end
-```
+Pure input→output. Table-driven examples are ideal: list the cases inline with the expected
+string and iterate. Dates render `MM/DD/YYYY`; times go through `StaffTimeHelper` or
+`ClientTimeHelper` in the office zone (specs without an office render in
+`America/Los_Angeles`).
 
-## Model Testing Patterns
+### Lib, rake tasks, channels, initializers
 
-### 1. Validation Testing
+- **lib/**: test like a service, through the public API.
+- **Rake tasks** (`spec/tasks`): load once (`Rails.application.load_tasks` guarded, then
+  `Rake::Task[...].reenable` per example). Production tasks must have a `DRY RUN`/`APPLY` banner
+  first and exactly one `RESULT:` line last (CLAUDE.md, Production Safety). Assert dry-run writes
+  nothing, `APPLY=1` writes, the `RESULT:` counts are right, and a re-run is idempotent. Those are
+  the behaviors the user relies on before running against production.
+- **Channels**: subscription accepted or rejected per actor, and what gets broadcast.
+- **Initializers**: only the behavior they install (a Rack middleware decision, a
+  `before_notify` hook that adds context). Not that a constant is set.
 
-Use shoulda-matchers for simple validations:
+## Matchers worth reaching for
 
 ```ruby
-describe 'validations' do
-  # Presence validations
-  it { should validate_presence_of(:first_name) }
-  it { should validate_presence_of(:last_name) }
-
-  # Inclusion validations
-  it { should validate_inclusion_of(:status).in_array(Model::STATUSES) }
-
-  # Allow blank options
-  it { should validate_inclusion_of(:sex).in_array(Client::SEXES).allow_blank }
-
-  # Uniqueness (requires subject)
-  subject { build(:model, organization: organization) }
-  it { should validate_uniqueness_of(:email).scoped_to(:organization_id) }
-end
+expect(result).to be_success                               # Result predicates, not be_a(Result)
+expect(result.error).to eq("Card was declined")            # exact user-facing copy
+expect { call }.to change { invoice.reload.status }.from("draft").to("sent")
+expect { call }.to have_enqueued_job(PushDeliveryJob).with(user.id, kind: "dm")
+expect { call }.not_to have_enqueued_mail                  # the negative that carries the risk
+expect(Honeybadger).to have_received(:notify).with(kind_of(Stripe::CardError), hash_including(context: hash_including(service: described_class.name)))
+it "…", :aggregate_failures do … end                       # one scenario, several facets
 ```
 
-For complex validations, use explicit tests:
+## When a spec fails and the cause isn't obvious
 
-```ruby
-describe 'custom validation' do
-  it 'validates presence of first_name' do
-    ActsAsTenant.with_tenant(organization) do
-      invalid_model = build(:model, first_name: nil, organization: organization)
-      expect(invalid_model).to be_invalid
-      expect(invalid_model.errors[:first_name]).to include("can't be blank")
-    end
-  end
+Work through `debugging-checklist.md`. The app-specific usual suspects, in order:
 
-  it 'allows all valid timezone values' do
-    ActsAsTenant.with_tenant(organization) do
-      ActiveSupport::TimeZone.us_zones.map(&:name).each do |tz|
-        model = build(:model, timezone: tz, organization: organization)
-        expect(model).to be_valid
-      end
-    end
-  end
+1. stale or unseeded parallel DB (`Reference data not found`): re-run `parallel:prepare_with_seeds`;
+2. a `build(:user, :role)` with no roles (roles need `create`);
+3. a timezone or UTC-boundary flake between 17:00 and midnight MST: `travel_to` a fixed instant;
+4. a soft-deleted record hidden by the default scope;
+5. an async HIPAA audit write that needs `perform_enqueued_jobs`.
 
-  it 'rejects invalid timezone' do
-    ActsAsTenant.with_tenant(organization) do
-      invalid_model = build(:model, timezone: 'Invalid/Timezone', organization: organization)
-      expect(invalid_model).to be_invalid
-      expect(invalid_model.errors[:timezone]).to include('is not included in the list')
-    end
-  end
-end
-```
+## Report
 
-### 2. Association Testing
-
-Use shoulda-matchers for associations:
-
-```ruby
-describe 'associations' do
-  # belongs_to
-  it { should belong_to(:organization) }
-  it { should belong_to(:user).optional }
-
-  # has_many with dependent
-  it { should have_many(:items).dependent(:destroy) }
-  it { should have_many(:records).dependent(:nullify) }
-
-  # has_many through
-  it { should have_many(:therapists).through(:client_therapists).source(:user) }
-
-  # has_one
-  it { should have_one(:profile).dependent(:destroy) }
-
-  # polymorphic
-  it { should belong_to(:assignable).optional }
-
-  # Test association behavior
-  describe 'association behavior' do
-    describe 'dependent destroy' do
-      it 'destroys associated items when parent is deleted' do
-        ActsAsTenant.with_tenant(organization) do
-          parent = create(:parent, organization: organization)
-          create_list(:item, 3, parent: parent, organization: organization)
-
-          expect { parent.destroy }.to change(Item, :count).by(-3)
-        end
-      end
-    end
-
-    describe 'through association' do
-      it 'returns associated records through join table' do
-        ActsAsTenant.with_tenant(organization) do
-          parent = create(:parent, organization: organization)
-          child1 = create(:child, organization: organization)
-          child2 = create(:child, organization: organization)
-          create(:join_record, parent: parent, child: child1, organization: organization)
-          create(:join_record, parent: parent, child: child2, organization: organization)
-
-          expect(parent.children).to include(child1, child2)
-          expect(parent.children.count).to eq(2)
-        end
-      end
-    end
-  end
-end
-```
-
-### 3. Callback Testing
-
-Test callbacks explicitly:
-
-```ruby
-describe 'callbacks' do
-  describe 'before_save' do
-    describe '#normalize_phone_number' do
-      it 'strips non-digit characters from phone' do
-        ActsAsTenant.with_tenant(organization) do
-          model = build(:model, phone: '(123) 456-7890', organization: organization)
-          model.save
-
-          expect(model.phone).to eq('1234567890')
-        end
-      end
-
-      it 'handles phone numbers with dots and dashes' do
-        ActsAsTenant.with_tenant(organization) do
-          model = build(:model, phone: '123.456.7890', organization: organization)
-          model.save
-
-          expect(model.phone).to eq('1234567890')
-        end
-      end
-
-      it 'does not modify phone if blank' do
-        ActsAsTenant.with_tenant(organization) do
-          model = build(:model, phone: nil, organization: organization)
-          model.save
-
-          expect(model.phone).to be_nil
-        end
-      end
-    end
-  end
-
-  describe 'after_create' do
-    it 'sends notification email after creation' do
-      ActsAsTenant.with_tenant(organization) do
-        expect {
-          create(:model, organization: organization)
-        }.to change { ActionMailer::Base.deliveries.count }.by(1)
-      end
-    end
-  end
-end
-```
-
-### 4. Scope Testing
-
-Test scopes thoroughly:
-
-```ruby
-describe 'scopes' do
-  describe '.active' do
-    it 'returns only active records' do
-      ActsAsTenant.with_tenant(organization) do
-        active1 = create(:model, status: :active, organization: organization)
-        active2 = create(:model, status: :active, organization: organization)
-        inactive = create(:model, status: :inactive, organization: organization)
-
-        expect(Model.active).to include(active1, active2)
-        expect(Model.active).not_to include(inactive)
-      end
-    end
-  end
-
-  describe '.recent' do
-    it 'returns records in descending order by created_at' do
-      ActsAsTenant.with_tenant(organization) do
-        old = create(:model, created_at: 2.days.ago, organization: organization)
-        new = create(:model, created_at: 1.day.ago, organization: organization)
-        newest = create(:model, created_at: 1.hour.ago, organization: organization)
-
-        expect(Model.recent).to eq([newest, new, old])
-      end
-    end
-  end
-end
-```
-
-### 5. Instance Method Testing
-
-Test all public methods with contexts:
-
-```ruby
-describe 'instance methods' do
-  describe '#full_name' do
-    it 'returns concatenated first and last name' do
-      ActsAsTenant.with_tenant(organization) do
-        model = build(:model, first_name: 'John', last_name: 'Doe', organization: organization)
-        expect(model.full_name).to eq('John Doe')
-      end
-    end
-
-    it 'handles names with spaces' do
-      ActsAsTenant.with_tenant(organization) do
-        model = build(:model, first_name: 'Mary Jane', last_name: 'Watson', organization: organization)
-        expect(model.full_name).to eq('Mary Jane Watson')
-      end
-    end
-  end
-
-  describe '#age' do
-    it 'calculates age from date_of_birth' do
-      ActsAsTenant.with_tenant(organization) do
-        freeze_time do
-          model = build(:model, date_of_birth: 30.years.ago.to_date, organization: organization)
-          expect(model.age).to eq(30)
-        end
-      end
-    end
-
-    it 'returns nil when date_of_birth is not present' do
-      ActsAsTenant.with_tenant(organization) do
-        model = build(:model, date_of_birth: nil, organization: organization)
-        expect(model.age).to be_nil
-      end
-    end
-  end
-
-  describe '#active?' do
-    context 'when status is active' do
-      it 'returns true' do
-        model = build(:model, status: :active)
-        expect(model.active?).to be true
-      end
-    end
-
-    context 'when status is inactive' do
-      it 'returns false' do
-        model = build(:model, status: :inactive)
-        expect(model.active?).to be false
-      end
-    end
-  end
-end
-```
-
-### 6. Class Method Testing
-
-```ruby
-describe 'class methods' do
-  describe '.ransackable_attributes' do
-    it 'returns allowed searchable attributes' do
-      expect(Model.ransackable_attributes).to eq(%w[first_name last_name email])
-    end
-  end
-
-  describe '.search' do
-    it 'finds records by name' do
-      ActsAsTenant.with_tenant(organization) do
-        match = create(:model, first_name: 'John', organization: organization)
-        no_match = create(:model, first_name: 'Jane', organization: organization)
-
-        results = Model.search('John')
-        expect(results).to include(match)
-        expect(results).not_to include(no_match)
-      end
-    end
-  end
-end
-```
-
-## Service Object Testing Patterns
-
-Services follow a specific pattern in this app:
-
-```ruby
-require 'rails_helper'
-
-RSpec.describe MyService, type: :service do
-  let(:service) { described_class.new }
-  let(:service_with_object) { described_class.new(object) }
-  let(:object) { build_stubbed(:object) }
-
-  describe '#initialize' do
-    context 'with a parameter' do
-      it 'sets the object' do
-        expect(service_with_object.object).to eq(object)
-      end
-
-      it 'initializes with empty errors array' do
-        expect(service_with_object.errors).to eq([])
-      end
-    end
-
-    context 'without parameters' do
-      it 'initializes with nil object' do
-        expect(service.object).to be_nil
-      end
-    end
-  end
-
-  describe '#call' do
-    let(:valid_params) { { name: 'Test', value: 123 } }
-
-    context 'with valid parameters' do
-      it 'performs the operation successfully' do
-        expect(service.call(valid_params)).to be true
-      end
-
-      it 'creates the expected record' do
-        expect {
-          service.call(valid_params)
-        }.to change(Model, :count).by(1)
-      end
-
-      it 'sets attributes correctly' do
-        service.call(valid_params)
-        expect(service.object.name).to eq('Test')
-        expect(service.object.value).to eq(123)
-      end
-    end
-
-    context 'with invalid parameters' do
-      let(:invalid_params) { { name: '' } }
-
-      it 'returns false' do
-        expect(service.call(invalid_params)).to be false
-      end
-
-      it 'does not create a record' do
-        expect {
-          service.call(invalid_params)
-        }.not_to change(Model, :count)
-      end
-
-      it 'populates errors array' do
-        service.call(invalid_params)
-        expect(service.errors).not_to be_empty
-      end
-
-      it 'includes specific error messages' do
-        service.call(invalid_params)
-        expect(service.errors).to include("Name can't be blank")
-      end
-    end
-  end
-
-  describe 'error handling' do
-    it 'accumulates multiple errors' do
-      service.errors << "First error"
-      service.errors << "Second error"
-      expect(service.errors).to eq(["First error", "Second error"])
-    end
-
-    it 'starts with empty errors array' do
-      expect(service.errors).to eq([])
-    end
-  end
-end
-```
-
-### Service Testing Best Practices
-
-1. **Test initialization** - Verify service sets up correctly
-2. **Test happy path** - Valid inputs produce expected outputs
-3. **Test error cases** - Invalid inputs are handled gracefully
-4. **Test side effects** - Database changes, emails sent, jobs enqueued
-5. **Test error messages** - Users get helpful feedback
-6. **Mock external dependencies** - Don't call real APIs in tests
-
-```ruby
-describe '#process_payment' do
-  let(:payment_service) { described_class.new(payment) }
-  let(:payment) { create(:payment, amount: 100) }
-
-  context 'when payment gateway succeeds' do
-    before do
-      allow(Stripe::Charge).to receive(:create).and_return(
-        double(id: 'ch_123', status: 'succeeded')
-      )
-    end
-
-    it 'marks payment as completed' do
-      payment_service.process
-      expect(payment.reload.status).to eq('completed')
-    end
-
-    it 'stores transaction ID' do
-      payment_service.process
-      expect(payment.reload.transaction_id).to eq('ch_123')
-    end
-
-    it 'returns true' do
-      expect(payment_service.process).to be true
-    end
-  end
-
-  context 'when payment gateway fails' do
-    before do
-      allow(Stripe::Charge).to receive(:create).and_raise(
-        Stripe::CardError.new('Insufficient funds', nil)
-      )
-    end
-
-    it 'marks payment as failed' do
-      payment_service.process
-      expect(payment.reload.status).to eq('failed')
-    end
-
-    it 'returns false' do
-      expect(payment_service.process).to be false
-    end
-
-    it 'adds error message' do
-      payment_service.process
-      expect(payment_service.errors).to include('Insufficient funds')
-    end
-  end
-end
-```
-
-## Multi-Tenancy Testing
-
-This app uses ActsAsTenant. Always wrap tests in tenant context:
-
-```ruby
-describe 'with multi-tenancy' do
-  let(:organization) { create(:organization) }
-
-  before do
-    ActsAsTenant.with_tenant(organization) {}
-  end
-
-  it 'associates record with organization' do
-    ActsAsTenant.with_tenant(organization) do
-      model = create(:model, organization: organization)
-      expect(model.organization_id).to eq(organization.id)
-    end
-  end
-
-  it 'scopes queries to organization' do
-    org1 = create(:organization)
-    org2 = create(:organization)
-
-    ActsAsTenant.with_tenant(org1) do
-      create(:model, organization: org1)
-    end
-
-    ActsAsTenant.with_tenant(org2) do
-      create(:model, organization: org2)
-      expect(Model.count).to eq(1) # Only sees org2's record
-    end
-  end
-end
-```
-
-## Factory Testing
-
-Always validate your factories:
-
-```ruby
-describe 'factory validation' do
-  it 'creates valid model with default factory' do
-    ActsAsTenant.with_tenant(organization) do
-      model = create(:model, organization: organization)
-
-      expect(model).to be_valid
-      expect(model).to be_persisted
-    end
-  end
-
-  it 'creates valid model with all traits' do
-    ActsAsTenant.with_tenant(organization) do
-      [:trait1, :trait2, :trait3].each do |trait|
-        model = create(:model, trait, organization: organization)
-        expect(model).to be_valid
-      end
-    end
-  end
-
-  it 'builds valid model without saving' do
-    ActsAsTenant.with_tenant(organization) do
-      model = build(:model, organization: organization)
-      expect(model).to be_valid
-      expect(model).not_to be_persisted
-    end
-  end
-end
-```
-
-## Edge Case Testing
-
-Always test boundary conditions:
-
-```ruby
-describe 'edge cases' do
-  describe '#age calculation edge cases' do
-    it 'handles date_of_birth on current date' do
-      ActsAsTenant.with_tenant(organization) do
-        freeze_time do
-          model = build(:model, date_of_birth: Date.current, organization: organization)
-          expect(model.age).to eq(0)
-        end
-      end
-    end
-
-    it 'handles very old dates' do
-      ActsAsTenant.with_tenant(organization) do
-        freeze_time do
-          model = build(:model, date_of_birth: 120.years.ago.to_date, organization: organization)
-          expect(model.age).to eq(120)
-        end
-      end
-    end
-
-    it 'handles leap year birthdays' do
-      ActsAsTenant.with_tenant(organization) do
-        freeze_time do
-          model = build(:model, date_of_birth: Date.new(2000, 2, 29), organization: organization)
-          expect(model.age).to be >= 0
-        end
-      end
-    end
-  end
-
-  describe 'empty associations' do
-    it 'handles model with no related records' do
-      ActsAsTenant.with_tenant(organization) do
-        model = create(:model, organization: organization)
-        expect(model.items).to be_empty
-        expect(model.primary_item).to be_nil
-      end
-    end
-  end
-
-  describe 'nil handling' do
-    it 'handles nil values gracefully' do
-      model = build(:model, optional_field: nil)
-      expect(model.calculate_from_optional).to be_nil
-    end
-  end
-end
-```
-
-## Testing Best Practices
-
-### Use `let` and `let!` Appropriately
-
-```ruby
-# let - Lazy evaluated, only created when referenced
-let(:user) { create(:user) }
-
-# let! - Eager evaluated, created before each test
-let!(:required_user) { create(:user) }
-
-# Use let for optional data
-describe '#optional_method' do
-  let(:optional_data) { create(:data) }
-
-  it 'works without optional data' do
-    expect(model.method).to be_valid
-  end
-
-  it 'works with optional data' do
-    model.data = optional_data
-    expect(model.method).to include(optional_data)
-  end
-end
-```
-
-### Build vs Create
-
-```ruby
-# Use build when persistence not needed (faster)
-let(:model) { build(:model) }
-
-# Use create when database persistence is required
-let!(:model) { create(:model) }
-
-# Use build_stubbed for read-only tests (fastest)
-let(:model) { build_stubbed(:model) }
-```
-
-### Time Testing
-
-```ruby
-describe '#expires_at' do
-  it 'sets expiration to 30 days from now' do
-    freeze_time do
-      model = create(:model)
-      expect(model.expires_at).to eq(30.days.from_now)
-    end
-  end
-
-  it 'handles timezone correctly' do
-    Time.use_zone('Pacific Time (US & Canada)') do
-      freeze_time do
-        model = create(:model)
-        expect(model.expires_at.zone).to eq('PST')
-      end
-    end
-  end
-end
-```
-
-### Testing Enums
-
-```ruby
-describe 'status enum' do
-  it { should define_enum_for(:status).with_values(
-    draft: 0,
-    pending: 1,
-    completed: 2,
-    cancelled: 3
-  ) }
-
-  it 'provides status query methods' do
-    model = build(:model, status: :draft)
-    expect(model.draft?).to be true
-    expect(model.completed?).to be false
-  end
-
-  it 'allows status transitions' do
-    model = create(:model, status: :draft)
-    model.pending!
-    expect(model.status).to eq('pending')
-  end
-end
-```
-
-### Testing Concerns
-
-```ruby
-describe 'concerns' do
-  describe 'SoftDeletable' do
-    it 'includes SoftDeletable concern' do
-      expect(Model.included_modules).to include(SoftDeletable)
-    end
-
-    it { should respond_to(:deleted_at) }
-    it { should respond_to(:soft_delete) }
-    it { should respond_to(:restore) }
-    it { should respond_to(:deleted?) }
-
-    it 'soft deletes records by setting deleted_at' do
-      ActsAsTenant.with_tenant(organization) do
-        model = create(:model, organization: organization)
-        expect(model.deleted_at).to be_nil
-
-        model.soft_delete
-        expect(model.deleted_at).not_to be_nil
-        expect(model.deleted?).to be true
-      end
-    end
-
-    it 'restores soft deleted records' do
-      ActsAsTenant.with_tenant(organization) do
-        model = create(:model, organization: organization)
-        model.soft_delete
-
-        model.restore
-        expect(model.deleted_at).to be_nil
-        expect(model.deleted?).to be false
-      end
-    end
-  end
-end
-```
-
-## Testing Database Transactions
-
-```ruby
-describe 'transactional behavior' do
-  it 'rolls back on error' do
-    expect {
-      ActiveRecord::Base.transaction do
-        create(:model)
-        raise ActiveRecord::Rollback
-      end
-    }.not_to change(Model, :count)
-  end
-
-  it 'commits on success' do
-    expect {
-      ActiveRecord::Base.transaction do
-        create(:model)
-      end
-    }.to change(Model, :count).by(1)
-  end
-end
-```
-
-## Common Matchers
-
-```ruby
-# Presence
-expect(model).to be_present
-expect(model).to be_nil
-expect(array).to be_empty
-
-# Boolean
-expect(model.active?).to be true
-expect(model.active?).to be_truthy  # nil or false
-expect(model.active?).to be_falsey  # anything truthy
-
-# Equality
-expect(result).to eq(expected)  # == comparison
-expect(result).to eql(expected) # eql? comparison
-expect(result).to be(expected)  # same object
-
-# Comparison
-expect(value).to be > 10
-expect(value).to be <= 100
-expect(value).to be_between(1, 10).inclusive
-
-# Collections
-expect(array).to include(item)
-expect(array).to match_array([1, 2, 3])  # same elements, any order
-expect(hash).to include(key: value)
-
-# Change matchers
-expect { action }.to change(Model, :count).by(1)
-expect { action }.to change { model.status }.from('pending').to('completed')
-expect { action }.not_to change(Model, :count)
-
-# Raise errors
-expect { action }.to raise_error(StandardError)
-expect { action }.to raise_error(StandardError, 'message')
-expect { action }.not_to raise_error
-
-# Output
-expect { puts 'test' }.to output("test\n").to_stdout
-
-# Database
-expect(model).to be_persisted
-expect(model).to be_valid
-expect(model).to be_invalid
-expect(model.errors[:field]).to include('message')
-```
-
-## Debugging Failed Tests
-
-When a test fails:
-
-```ruby
-# Print current state
-puts model.inspect
-puts model.errors.full_messages
-pp model.attributes  # Pretty print
-
-# Check database state
-puts Model.count
-puts Model.last.inspect
-
-# Check associations
-puts model.association(:items).loaded?
-puts model.items.to_sql
-
-# Binding for debugging
-require 'pry'
-binding.pry  # Pauses execution
-```
-
-## Anti-Patterns to Avoid
-
-**DON'T:**
-- Test private methods directly
-- Test implementation details
-- Have tests depend on each other
-- Use hardcoded IDs (use factories)
-- Create too much test data
-- Test framework code (Rails validations)
-- Use sleep or arbitrary waits
-- Share state between tests
-
-**DO:**
-- Test public interfaces
-- Test behavior and outcomes
-- Make tests independent
-- Use factories with dynamic data
-- Create minimal necessary data
-- Test your business logic
-- Use proper matchers
-- Isolate each test
-
-## Test Organization Checklist
-
-For every model/service test file:
-
-- [ ] `require 'rails_helper'` at top
-- [ ] Correct type metadata (`:model`, `:service`, etc.)
-- [ ] Setup data with `let`/`let!`
-- [ ] Group tests logically with `describe`/`context`
-- [ ] Test validations comprehensively
-- [ ] Test all associations
-- [ ] Test all callbacks
-- [ ] Test all public methods
-- [ ] Test class methods
-- [ ] Test scopes
-- [ ] Include edge case tests
-- [ ] Validate factories work
-- [ ] Use descriptive test names
-- [ ] One assertion per test
-- [ ] Fast execution (< 1 second per test)
-
-## Execution Strategy
-
-When writing RSpec tests:
-
-1. **Read the code** - Understand what the model/service does
-2. **Identify behaviors** - What should it do? What shouldn't it do?
-3. **Write structure first** - Set up describe/context blocks
-4. **Write happy path** - Test expected behavior first
-5. **Add edge cases** - Test boundaries and unusual inputs
-6. **Test failures** - Ensure errors are handled properly
-7. **Run tests frequently** - Get fast feedback
-8. **Refactor** - Improve test clarity and remove duplication
-9. **Verify coverage** - Ensure all code paths tested
-
----
-
-**Remember**: Good tests are clear, fast, and reliable. They serve as living documentation of how your code should behave.
+End with: what you changed (examples deleted, merged, added, tightened), lines and examples
+before→after, coverage before→after with `lost_lines`, probes killed/total with any survivor
+explained, and findings about the source code. Keep it short. If the caller gave you a report
+format (e.g. `/spec-sweep`), use that one instead.

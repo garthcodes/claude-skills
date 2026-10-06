@@ -1,5 +1,5 @@
 ---
-description: Orchestrate parallel test generation for all changed components, jobs, models, policies, and services in the current branch. Native replacement for scripts/test-changed-all.sh.
+description: Orchestrate parallel test generation/review for all changed components, jobs, models, policies, and services in the current branch — making sure the changed behavior is guarded by real assertions (proved with coverage + mutation probes), without padding. Native replacement for scripts/test-changed-all.sh. For a whole-suite cleanup use /spec-sweep instead.
 argument-hint: '[options] [base-branch]'
 ---
 
@@ -11,9 +11,14 @@ Native Claude orchestrator that mirrors `scripts/test-changed-all.sh`. Discovers
 |------------|--------------------|------------------|------------------------------|
 | components | `app/components/`  | `spec/components/` | `viewcomponent-test-expert`  |
 | jobs       | `app/jobs/`        | `spec/jobs/`     | `rspec-test-expert`          |
-| models     | `app/models/`      | `spec/models/`   | `rspec-test-expert`          |
-| policies   | `app/policies/`    | `spec/policies/` | `rspec-test-expert`          |
+| models     | `app/models/`      | `spec/models/`   | `model-test`        |
+| policies   | `app/policies/`    | `spec/policies/` | `policy-test`       |
 | services   | `app/services/`    | `spec/services/` | `service-test`               |
+
+Every skill above shares one yardstick, `.claude/skills/rspec-test-expert/test-quality.md`: test the
+behavior the change introduced, prove it with coverage plus mutation probes, and add no padding. This
+orchestrator measures success by "the changed behavior is guarded", not by how many examples were
+added.
 
 ## Inputs
 
@@ -93,6 +98,12 @@ If every category is empty, print a green "Nothing to do — no changed files in
 
 ## Step 3 — Dispatch Agents in Parallel
 
+**Test databases first.** Parallel agents must not share `<app>_test`: `rails_helper`'s `before(:suite)`
+truncates it, so concurrent runs wipe each other's data. Give agent *k* (1-based) `TEST_ENV_NUMBER=k+1`
+(2..6). Before dispatching, run `bash .claude/skills/spec-sweep/scripts/db_ready.sh 2 3 4 5 6`. If any DB
+is NOT READY, run `PARALLEL_TEST_PROCESSORS=9 bundle exec rake parallel:prepare_with_seeds` (~25 s), but only when
+nothing else is running specs: it reloads, i.e. wipes, <app>_test and <app>_test2..9.
+
 For each non-empty category, dispatch **one Agent in parallel** (single message, multiple Agent tool uses). Use `subagent_type: "general-purpose"`. Each agent's prompt must be self-contained and include:
 
 1. The category name and the list of `(class_name, source_path, spec_path, spec_status)` tuples to process.
@@ -104,29 +115,33 @@ For each non-empty category, dispatch **one Agent in parallel** (single message,
 
 > You are processing the `<category>` category for the test-changed orchestrator. Process the files below sequentially. For each file, invoke `/<skill-name>` via the Skill tool with the prompt indicated.
 >
+> Run every rspec / line_coverage / probe command with `TEST_ENV_NUMBER=<n>` — your own database; never run rspec without it. Never edit app code; record suspected bugs as findings.
+>
 > Files to process:
 > 1. `<ClassName>` — source: `<source_path>`, spec: `<spec_path>`, status: `<spec_status>`
 > 2. ...
 >
 > **If status is `[no spec]`** invoke the skill with:
 >
-> > Create comprehensive RSpec tests for the `<ClassName>` `<singular-category>`.
+> > Write mode: create the RSpec spec for the `<ClassName>` `<singular-category>`.
 > >
 > > - Source file: `<source_path>`
 > > - Spec file to create: `<spec_path>`
 > >
-> > Read the source, generate the spec following project conventions (FactoryBot, Result objects where applicable, multi-tenant context, etc.), then run `bundle exec rspec <spec_path>` and iterate until green.
+> > One example per behavior/decision in the source, exact assertions, no padding (see test-quality.md). Run with `TEST_ENV_NUMBER=<n>` until green, then 2–5 probes, all KILLED.
 >
 > **If status is `[spec exists]`** invoke the skill with:
 >
-> > Review and improve the RSpec tests for the `<ClassName>` `<singular-category>`.
+> > Review mode, scoped to this branch's change: `<ClassName>` `<singular-category>`.
 > >
 > > - Source file: `<source_path>`
 > > - Spec file: `<spec_path>`
 > >
-> > Read both files, identify gaps in coverage (public methods, success/failure paths, edge cases, side effects), add the missing tests, then run `bundle exec rspec <spec_path>` and iterate until green.
+> > - What changed: `git diff <merge-base> HEAD -- <source_path>`
+> >
+> > Make sure every behavior the diff adds or changes is guarded by an exact assertion (add examples only where a changed decision is unguarded). Delete fat that touches the changed area; leave unrelated old examples alone — a full trim is `/spec-sweep`'s job. Coverage (`line_coverage.rb --baseline`) must not drop; probe the changed lines, all KILLED.
 >
-> After each file, record one of: `PASS`, `FAIL <one-line reason>`, or `SKIP <reason>`.
+> After each file, record one of: `PASS (+<added>/-<removed> examples, probes <k>/<n>)`, `FAIL <one-line reason>`, or `SKIP <reason>`, plus any findings about the source.
 >
 > When done, return a **single message** with this exact shape:
 >

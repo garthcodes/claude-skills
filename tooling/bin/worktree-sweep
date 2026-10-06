@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# Remove EVERY worktree of this repo — no PR, dirty, or open-work checks.
+# Remove the worktrees that hold nothing worth keeping; keep the current or relevant ones.
 #
-# Usage: bin/worktree-sweep            # act
-#        bin/worktree-sweep --dry-run  # print what would be removed, change nothing
+# Usage: bin/worktree-sweep            # remove stale worktrees, keep relevant ones
+#        bin/worktree-sweep --all      # remove EVERY worktree, no checks (old behavior)
+#        bin/worktree-sweep --dry-run  # print the keep/remove decision for each, change nothing
+#        (--all and --dry-run combine)
 #
 # Covers every worktree registered with this repo except the main checkout (pipeline
 # .claude/worktrees/* and sibling ../<app>-* from /worktree alike), plus any leftover directory
-# under .claude/worktrees/ that git no longer knows about. For each it stops the dev server on
-# the worktree's own PORT (only when its .env sets one — never the main checkout's port), drops
-# the <app>_development/<app>_test databases matching its DATABASE_SUFFIX (including
-# parallel_rspec numbered ones), and runs `git worktree remove --force` (uncommitted changes
-# are discarded). Branches are never deleted, so committed work survives.
+# under .claude/worktrees/ that git no longer knows about. Without --all a worktree is KEPT when:
+#   1. it has uncommitted changes to tracked files, or untracked files outside .claude/ tmp/ log/
+#   2. it has non-merge commits that are on no remote branch (unpushed work)
+#   3. its branch has an open PR
+#   4. a Claude Code session is running inside it
+#   5. its branch has no PR and a file in it (or its last commit) changed in the last 24 hours
+# Everything else is removed: the dev server running from it is stopped (matched by the
+# listening process's working directory, so the main checkout's server is never touched), the <app>_development/<app>_test databases matching its DATABASE_SUFFIX are dropped
+# (including parallel_rspec numbered ones), and `git worktree remove --force` runs.
+# Branches are never deleted, so committed work survives.
 #
 # Exit status: 0, or 1 if any "error —" line was printed.
 set -uo pipefail
@@ -24,11 +31,15 @@ if [ -z "$APP_DB_PREFIX" ]; then
 fi
 
 DRY_RUN=0
-case "${1:-}" in
-  --dry-run) DRY_RUN=1 ;;
-  "") ;;
-  *) echo "Usage: bin/worktree-sweep [--dry-run]" >&2; exit 2 ;;
-esac
+ALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --all) ALL=1 ;;
+    *) echo "Usage: bin/worktree-sweep [--all] [--dry-run]" >&2; exit 2 ;;
+  esac
+done
+RECENT_MINUTES=1440
 
 MAIN_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 WT_ROOT="$MAIN_DIR/.claude/worktrees"
@@ -55,18 +66,68 @@ if [ ${#targets[@]} -eq 0 ]; then
   exit 0
 fi
 
+# Branch -> PR state (OPEN/MERGED/CLOSED, latest PR per branch). Empty when gh is unavailable,
+# in which case rule 3 cannot fire and rule 5 treats every branch as PR-less.
+PR_STATES=""
+if [ $ALL -eq 0 ]; then
+  PR_STATES="$(cd "$MAIN_DIR" && gh pr list --state all --limit 500 --json headRefName,state,updatedAt \
+    --jq 'group_by(.headRefName)[] | sort_by(.updatedAt) | last | "\(.headRefName)\t\(.state)"' 2>/dev/null || true)"
+  git -C "$MAIN_DIR" fetch --quiet --prune origin 2>/dev/null || true
+fi
+
+# Working directories of running Claude Code CLI processes.
+CLAUDE_CWDS="$(for pid in $(ps -axo pid=,comm= | awk '$2 ~ /(^|\/)claude$/ {print $1}'); do
+  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'
+done)"
+
+# Prints the reason to keep worktree $d (empty → remove). Uses $d and $branch.
+keep_reason() {
+  local n pr_state
+  n="$(git -C "$d" status --porcelain 2>/dev/null | grep -v '^??' | wc -l | tr -d ' ')"
+  [ "$n" -gt 0 ] && { echo "$n uncommitted change(s)"; return; }
+  n="$(git -C "$d" status --porcelain 2>/dev/null | grep '^??' | grep -vE '^\?\? (\.claude|tmp|log)/' | wc -l | tr -d ' ')"
+  [ "$n" -gt 0 ] && { echo "$n untracked file(s)"; return; }
+  n="$(git -C "$d" rev-list --count --no-merges HEAD --not --remotes 2>/dev/null || echo 0)"
+  [ "$n" -gt 0 ] && { echo "$n unpushed commit(s)"; return; }
+  pr_state="$(printf '%s\n' "$PR_STATES" | awk -F'\t' -v b="$branch" '$1 == b {print $2}')"
+  [ "$pr_state" = "OPEN" ] && { echo "open PR"; return; }
+  printf '%s\n' "$CLAUDE_CWDS" | grep -qE "^$(printf '%s' "$d" | sed 's/[][\.*^$/]/\\&/g')(/|$)" \
+    && { echo "Claude session running in it"; return; }
+  if [ -z "$pr_state" ]; then
+    if [ "$(git -C "$d" log -1 --format=%ct 2>/dev/null || echo 0)" -gt "$(( $(date +%s) - RECENT_MINUTES * 60 ))" ] ||
+      [ -n "$(find "$d" \( -name .git -o -name node_modules -o -path "$d/tmp" -o -path "$d/log" -o -path "$d/vendor" \
+        -o -path "$d/coverage" -o -path "$d/storage" -o -path "$d/public/assets" -o -path "$d/app/assets/builds" \) -prune \
+        -o -type f -mmin -"$RECENT_MINUTES" -print -quit 2>/dev/null)" ]; then
+      echo "no PR, touched in the last 24h"; return
+    fi
+  fi
+}
+
 env_value() {
   grep -s "^$2=" "$1/.env" | tail -1 | cut -d= -f2 | tr -d '"'"'"' ' || true
 }
 
+# "pid<TAB>cwd" for every process listening on a TCP port, looked up once.
+LISTENERS="$(for pid in $(lsof -ti tcp -sTCP:LISTEN 2>/dev/null | sort -u); do
+  printf '%s\t%s\n' "$pid" "$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
+done)"
+
+# PIDs of still-running listeners whose working directory is inside $d (the worktree's dev
+# server). Matching by directory, not by .env PORT, because worktrees reuse ports.
+server_pids() {
+  local pid cwd
+  while IFS=$'\t' read -r pid cwd; do
+    case "$cwd" in "$d"|"$d"/*) kill -0 "$pid" 2>/dev/null && echo "$pid" ;; esac
+  done <<< "$LISTENERS"
+}
+
 stop_server() {
-  [ -n "$port" ] || return 0
   local pids i
-  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  pids="$(server_pids)"
   [ -n "$pids" ] || return 0
   kill $pids 2>/dev/null || true
   for i in 1 2 3 4 5; do
-    pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+    pids="$(server_pids)"
     [ -z "$pids" ] && return 0
     sleep 1
   done
@@ -97,9 +158,18 @@ for i in "${!targets[@]}"; do
   port="$(env_value "$d" PORT)"
   suffix="$(env_value "$d" DATABASE_SUFFIX)"
   dbs_note="${suffix:+, dbs ${APP_DB_PREFIX}_*${suffix}}"
+  branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+  if [ $ALL -eq 0 ] && [ $registered -eq 1 ]; then
+    reason="$(keep_reason)"
+    if [ -n "$reason" ]; then
+      echo "$name: kept — $reason"; continue
+    fi
+  fi
 
   if [ $DRY_RUN -eq 1 ]; then
-    echo "$name: would remove${port:+ (port $port)}${dbs_note}"; continue
+    srv=""; [ -n "$(server_pids)" ] && srv=", server running"
+    echo "$name: would remove${port:+ (port $port)}${srv}${dbs_note}"; continue
   fi
 
   stop_server

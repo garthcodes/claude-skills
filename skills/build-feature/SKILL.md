@@ -55,7 +55,7 @@ PRD Document
   ┌ C1 System tests      /plan-system-tests -> /system-test-expert -> existing red specs -> /fix-system-test (≤2) -> commit   (lead)
   └ C2 QA                dev server -> /create-qa-document -> /execute-qa ‖ wait for C1 ✓ -> bug fixes (≤2) + screenshots
   C3 Acceptance gate     /verify-acceptance -> close gaps (≤2) -> close browser (server stays up)
-  C4 Ship                /simplify -> bin/ci (≤3, polled) -> screenshots branch -> PR body -> cleanup -> rebase -> push
+  C4 Ship                /simplify -> bin/ci (≤3, polled) -> screenshots branch -> PR body -> cleanup -> rebase -> push -> PR -> cold review
                          ACCEPTANCE GATE: PASS -> PR | SHOULD GAPS -> draft PR | FAIL -> no PR
 
   -> Report results to user
@@ -259,7 +259,10 @@ Pipeline Results:
 - QA Scenarios: [X/Y passed]
 - Bugs Fixed: [count]
 - Screenshots: [screenshots/${FEATURE_NAME} branch — delete after merge | not available]
+- Cold Review: [comment link — tag counts — verify results | skipped: GATE FAILED]
 ```
+
+When the cold review comment holds anything beyond `verify` lines, add: "Next: `/settle-pr-review <PR>` to decide on the review."
 
 **If C4 returned `GATE FAILED`:** the report's first line is
 `Feature Build STOPPED at Acceptance Gate: ${FEATURE_NAME}` followed by each unmet **Must** AC

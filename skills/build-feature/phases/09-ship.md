@@ -150,6 +150,12 @@ If none, write "None."]
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
 
+**Cold-review notes, from the same read.** Step 7's reviewer needs what the state file knows, and
+Step 5 deletes it. Write `tmp/cold-review-notes.md` now, about 15 lines, honestly: the decisions agents
+made that the PRD left open, retry-limit escalations, ACs verified only by a spec (not seen in QA),
+Should ACs left unverified and why, roles or data QA didn't cover, places where the build moved from
+the plan, and adjacent problems the reviews or QA noticed but left alone.
+
 ### Step 5: Remove pipeline artifacts
 
 Delete the planning, review, ticket, trace, and QA documents generated **by this pipeline run**.
@@ -222,7 +228,22 @@ Then the gate, from the `## Acceptance` verdict:
 
 After a PR is created: `rm -f tmp/pr-body.md; rm -rf tmp/pr-screenshots/`.
 
-### Step 7: Keep the worktree, databases, and server
+### Step 7: Cold review (PR or draft PR only; skip on GATE FAILED)
+
+Nine agents built this, and each one handed assumptions to the next. Follow
+`.claude/skills/resolve-issue/references/cold-review.md` with:
+
+- `<WHAT>`: "built feature ${FEATURE_NAME} from its PRD through a multi-agent pipeline"; `<WT>`: `${WORKTREE_PATH}`; slug `${FEATURE_NAME}`, with the notes at `tmp/cold-review-notes.md`
+- `<ASK>`: `1. The PRD: ${PRD}` and `2. The acceptance contract: ${AC_PATH}` (both under `<WT>`)
+- `<FOCUS>`: "The diff is large: don't read it line by line. Start from the PR's Known Issues and any AC verified only by a spec, and look for a requirement the code meets in letter but not in intent, a guard AC with a gap, and a behavior of existing screens the feature changed."
+- `<STOP>`: the default ("the PR does something other than what the PRD and contract asked")
+- `<RECHECK>`: re-run the affected spec files and `bin/standardrb` on the changed files; re-run `bin/ci` (detached and polled, per `_shared.md`) when app code changed
+
+Phase agents usually can't spawn agents. When the Agent tool isn't available, take the reviewer's
+part yourself using the brief: C4 didn't build the feature, so it is the coldest reader the run has. Then
+`rm -f tmp/cold-review-notes.md`.
+
+### Step 8: Keep the worktree, databases, and server
 
 Do NOT drop the databases or stop the server. The user runs `/worktree-sweep` by hand
 when they want every pipeline worktree removed.
@@ -235,4 +256,5 @@ PR: <url> | DRAFT PR: <url> | GATE FAILED — <AC-n (Must, status) — reason, o
 PORT: <n>   CI: <green after k cycles | failing: list>
 SIMPLIFY: <commit hash | no changes>   SCREENSHOTS: <branch | not available>
 KNOWN ISSUES: <count> (<sources>)
+COLD REVIEW: <comment link — tag counts — verify results | skipped: GATE FAILED>
 ```

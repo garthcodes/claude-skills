@@ -1,0 +1,50 @@
+{
+  "skill_name": "spec-sweep",
+  "notes": "Worker-level evals: each runs the per-type skill a /spec-sweep worker uses on one real bloated spec. Graded by probes/*.tsv mutation kills (fixed set per eval), coverage, size, smells, green, app/ untouched.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "mse-service-trim",
+      "skill": "service-test",
+      "prompt": "spec/services/mental_status_exam_validation_service_spec.rb is ~1300 lines for a ~370 line service. Trim the fat and make sure what's left actually tests the service for real. Don't commit.",
+      "expected_output": "Much shorter green spec; every validation rule, boundary and sentinel still guarded; no constructor/constant/type-only fat; app/ untouched.",
+      "files": [
+        "spec/services/mental_status_exam_validation_service_spec.rb",
+        "app/services/mental_status_exam_validation_service.rb"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "button-component-trim",
+      "skill": "component-test",
+      "prompt": "Clean up spec/components/button_component_spec.rb - it's 1000+ lines, mostly class-name checks. I want it to test what the button actually does. Don't commit.",
+      "expected_output": "Shorter green spec asserting rendered behavior (element kind, href/turbo data, disabled, confirm, sr-only label, caller options not mutated, variant mapping once); app/ untouched.",
+      "files": [
+        "spec/components/button_component_spec.rb",
+        "app/components/button_component.rb",
+        "app/components/button_component.html.erb"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "invoice-policy-review",
+      "skill": "policy-test",
+      "prompt": "Review spec/policies/invoice_policy_spec.rb and make it good - trim the fat and make sure it really guards who can touch invoices. Don't commit.",
+      "expected_output": "Compact role grid using real roles, scope asserts inclusion and exclusion, no cross-org/delegation padding; every role-widening/narrowing probe killed.",
+      "files": [
+        "spec/policies/invoice_policy_spec.rb",
+        "app/policies/invoice_policy.rb"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "token-service-write",
+      "skill": "service-test",
+      "prompt": "app/services/form_access_token_service.rb has no specs at all. Write them. Don't commit.",
+      "expected_output": "New lean spec guarding expiry (incl. nil expiry), the 5-attempt limit, attempt recording, custom expiration, attempt reset on regenerate, token entropy, invalid-input guards; no constructor/ivar/type-only padding.",
+      "files": [
+        "app/services/form_access_token_service.rb"
+      ]
+    }
+  ]
+}

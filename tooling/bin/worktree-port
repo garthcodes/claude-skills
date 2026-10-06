@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Allocate a dev-server port for a pipeline worktree (.claude/worktrees/*).
+# Allocate a dev-server port for a worktree (.claude/worktrees/* or a sibling ../<app>-*).
 #
 # Usage: bin/worktree-port                      # print the lowest free port (no side effects)
 #        bin/worktree-port --assign <path/.env> # allocate, write/replace PORT=<n> in that .env, print n
 #
-# A port is "free" when no .claude/worktrees/*/.env claims it (PORT=<n>) and nothing is
+# A port is "free" when no worktree .env claims it (PORT=<n>) and nothing is
 # listening on it. Range 3010–3099; ports are never reused while claimed. On exhaustion
 # exits 1 with a message pointing at /worktree-sweep.
 set -euo pipefail
@@ -28,10 +28,10 @@ elif [ -n "${1:-}" ]; then
   exit 2
 fi
 
-# Ports claimed by other pipeline worktrees' .env files (the target .env itself is excluded).
+# Ports claimed by other worktrees' .env files (the target .env itself is excluded).
 claimed() {
   local f
-  for f in "$WT_ROOT"/*/.env; do
+  for f in "$WT_ROOT"/*/.env "$(dirname "$MAIN_DIR")/$(basename "$MAIN_DIR")"-*/.env; do
     [ -f "$f" ] || continue
     [ "$f" = "$ENV_FILE" ] && continue
     grep -hs '^PORT=' "$f" | cut -d= -f2 | tr -d '"'"'"' '
@@ -51,7 +51,7 @@ find_free() {
     echo "$p"
     return 0
   done
-  echo "No free port in ${RANGE_START}–${RANGE_END} for pipeline worktrees — run /worktree-sweep to remove all worktrees" >&2
+  echo "No free port in ${RANGE_START}–${RANGE_END} for pipeline worktrees — run /worktree-sweep to remove stale worktrees" >&2
   return 1
 }
 

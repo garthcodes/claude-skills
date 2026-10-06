@@ -1,424 +1,116 @@
 ---
 name: policy-test
-description: Generate RSpec tests for a Pundit policy following the application's patterns
+description: Write or review the RSpec spec for one Pundit policy so every role × action decision, every relationship rule (assigned therapist, clinical supervisor, portal actor), and every policy scope's inclusions AND exclusions are asserted, using the real roles from Role::ROLES and no redundant cross-org or delegation padding. Use when the user asks for policy tests, points at app/policies or spec/policies, asks "who can do X" to be locked down in tests, or wants a policy spec trimmed or checked.
+argument-hint: '<app/policies/... or spec/policies/... path> [review|write]'
 ---
 
-# Pundit Policy Test Generator Command
+# Policy Test
 
-You are an expert Rails Pundit policy test developer. Write comprehensive, fast, and maintainable RSpec policy tests for the application following established patterns and best practices for Rails 8 and Pundit authorization.
+Write or review the spec for the policy at `$ARGUMENTS`. First read
+`.claude/skills/rspec-test-expert/test-quality.md` (the fat catalogue, the proof, concurrency-safe
+spec runs, and the review workflow). Policies are the security boundary of a HIPAA app, so here a
+missing **denial** is worse than a missing permission.
 
-## Core Principles
+Map paths: `app/policies/client_portal/foo_policy.rb` ↔ `spec/policies/client_portal/foo_policy_spec.rb`.
 
-### 1. Comprehensive Coverage
-- Test all standard CRUD actions (index?, show?, create?, new?, update?, edit?, destroy?)
-- Test all custom policy methods specific to the policy
-- Test policy scopes (Scope#resolve)
-- Test role-based authorization (admin, coordinator, therapist, supervisor, manager, biller)
-- Test resource ownership and assignment-based access
-- Test organization-level access (multi-tenancy)
-- Test edge cases (nil user, users without roles, cross-organization access)
-- Test inherited actions (new? delegates to create?, edit? delegates to update?)
-- Test users with multiple roles
-- Test special relationships (supervisor-supervisee, manager-managed users)
+## Facts that decide the setup
 
-### 2. Write Fast, Efficient Tests
-- Use `build` instead of `create` when database persistence is not required
-- Use `let` for lazy evaluation, `let!` for immediate evaluation
-- Avoid unnecessary database hits
-- Use deterministic data with sequences, not random values
-- Test authorization logic, not implementation details
+- Roles are `Role::ROLES`: `admin coordinator therapist manager clinical_supervisor biller
+  platform_admin`. There is no `supervisor` and no `owner` role (`InsurancePolicyPolicy#owner?`
+  and the factory's `:owner` trait are dead code).
+- Roles are added in `after(:create)`. Use `create(:user, :biller)`; `build` has no roles. A bare
+  `create(:user)` is a therapist. For "no role" use `create(:user, role_names: [])`.
+- `ApplicationPolicy` defines `new?` → `create?` and `edit?` → `update?` and the role predicates.
+  Test a delegating action only when **this** policy overrides it.
+- Tenant isolation is `acts_as_tenant`'s job (CLAUDE.md, Multi-tenancy). Don't write "admin from
+  another org is denied" examples, and don't add org-equality checks to make them pass.
+- Many rules hinge on relationships, not roles: `client_therapist` assignment, clinical
+  supervision of the treating therapist, the client-portal actor (client or guardian),
+  `platform_admin` on the admin subdomain. Read each predicate and find which records make it
+  true.
 
-### 3. Follow Established Patterns
-Reference these policy test files for patterns:
-- `spec/policies/` directory for existing policy tests
-- `app/policies/application_policy.rb` for base policy structure
-- Existing policy specs demonstrate comprehensive role and edge case testing
+## Shape: a permission grid per action, then the scope
 
-## Test File Structure
+Read every predicate and build the grid **from the code**: for each action, which actors are
+allowed and which are denied. Then express it compactly. Pundit predicate matchers keep each cell
+to one line:
 
 ```ruby
-# frozen_string_literal: true
+RSpec.describe SuperbillPolicy, type: :policy do
+  subject(:policy) { described_class.new(user, superbill) }
 
-require 'rails_helper'
+  let(:client) { create(:client) }
+  let(:superbill) { create(:superbill, client:) }
 
-RSpec.describe PolicyName, type: :policy do
-  let(:organization) { create(:organization) }
-  let(:other_organization) { create(:organization) }
-  let(:record) { create(:model_name, organization: organization) }
-
-  subject { described_class.new(user, record) }
-
-  before do
-    ActsAsTenant.current_tenant = organization
+  context "as admin" do
+    let(:user) { create(:user, :admin) }
+    it { is_expected.to be_show }
+    it { is_expected.to be_destroy }
   end
 
-  describe '#index?' do
-    # Test each role with context blocks
+  context "as the client's assigned therapist" do
+    let(:user) { create(:user, :therapist).tap { create(:client_therapist, user: _1, client:) } }
+    it { is_expected.to be_show }
+    it { is_expected.not_to be_destroy }
   end
 
-  describe '#show?' do
-    # Test viewing permissions for each role
-  end
-
-  describe '#create?' do
-    # Test creation permissions
-  end
-
-  describe '#new?' do
-    # Test that it delegates to create?
-  end
-
-  describe '#update?' do
-    # Test update permissions
-  end
-
-  describe '#edit?' do
-    # Test that it delegates to update?
-  end
-
-  describe '#destroy?' do
-    # Test deletion permissions
-  end
-
-  describe '#custom_action?' do
-    # Test any custom policy methods
-  end
-
-  describe 'Scope' do
-    describe '#resolve' do
-      # Test scope filtering for each role
-    end
-  end
-
-  describe 'inherited actions' do
-    # Test delegated actions like new? and edit?
-  end
-
-  describe 'edge cases' do
-    # Test nil user, users without roles, cross-org access, etc.
+  context "as a therapist NOT assigned to the client" do
+    let(:user) { create(:user, :therapist) }
+    it { is_expected.not_to be_show }
   end
 end
 ```
 
-## Key Testing Patterns
+(There is no `permit_actions` matcher in this repo. Use `be_<action>` / `not_to be_<action>`
+predicates as `spec/policies/superbill_policy_spec.rb` does. That file is a good reference.)
 
-### Subject Declaration
+For every action, include:
+
+- every role the code **allows**, plus the near-miss actors it must **deny**. The interesting
+  denials are the almost-allowed ones: an unassigned therapist, a supervisor of a *different*
+  therapist, a biller on a clinical record, a coordinator on a destroy;
+- each relationship branch: assigned vs. not, supervising vs. not, the portal actor vs. another
+  client;
+- record-state branches the policy reads (signed or locked note, soft-deleted record, `draft?`):
+  both sides.
+
+When a role is irrelevant to the policy (it never appears in any predicate and falls through to
+the default deny), one denial example for that role is enough. Don't build an exhaustive 7-role
+matrix of `false`s.
+
+### Scopes
+
+`Pundit.policy_scope!(user, Model)` (or `described_class::Scope.new(user, Model.all).resolve`) for
+each role branch in `resolve`. Every scope example must assert **both** what is included **and**
+what is excluded. A scope test that only checks `include(record)` passes for `scope.all`, which is
+exactly the bug that leaks PHI.
+
 ```ruby
-# For instance-level actions (show?, update?, destroy?)
-subject { described_class.new(user, record) }
-
-# For class-level actions (index?, create?)
-subject { described_class.new(user, ModelClass) }
-```
-
-### Testing Authorization with Expectations
-```ruby
-context 'when user is an admin' do
-  let(:user) { create(:user, :admin, organization: organization) }
-
-  it 'allows access' do
-    expect(subject.index?).to be true
-  end
-end
-
-context 'when user is a biller' do
-  let(:user) { create(:user, :biller, organization: organization) }
-
-  it 'denies access' do
-    expect(subject.index?).to be false
-  end
-end
-```
-
-### Testing Scopes
-```ruby
-describe 'Scope' do
-  describe '#resolve' do
-    let!(:record1) { create(:model, organization: organization) }
-    let!(:record2) { create(:model, organization: organization) }
-    let!(:other_org_record) do
-      ActsAsTenant.without_tenant do
-        create(:model, organization: other_organization)
-      end
-    end
-
-    context 'when user is an admin' do
-      let(:user) { create(:user, :admin, organization: organization) }
-
-      it 'returns all records in the organization' do
-        scope = Pundit.policy_scope(user, Model)
-        expect(scope).to include(record1, record2)
-        expect(scope).not_to include(other_org_record)
-      end
-    end
-
-    context 'when user is a therapist' do
-      let(:user) { create(:user, :therapist, organization: organization) }
-
-      before do
-        # Create assignment relationship
-        create(:assignment, user: user, record: record1)
-      end
-
-      it 'returns only assigned records' do
-        scope = Pundit.policy_scope(user, Model)
-        expect(scope).to include(record1)
-        expect(scope).not_to include(record2)
-      end
-    end
-  end
+it "shows a therapist only their assigned clients", :aggregate_failures do
+  mine = create(:client).tap { create(:client_therapist, user:, client: _1) }
+  theirs = create(:client)
+  expect(Pundit.policy_scope!(user, Client)).to contain_exactly(mine)
+  expect(Pundit.policy_scope!(user, Client)).not_to include(theirs) # explicit, for the reader
 end
 ```
 
-### Testing Delegated Actions
-```ruby
-describe '#new?' do
-  context 'when user is an admin' do
-    let(:user) { create(:user, :admin, organization: organization) }
+## Policy-specific fat
 
-    it 'delegates to create? and allows access' do
-      expect(subject.new?).to eq(subject.create?)
-      expect(subject.new?).to be true
-    end
-  end
+- Cross-organization examples and `ActsAsTenant.without_tenant` org setups (tenancy is enforced
+  elsewhere).
+- Seven-role matrices where five rows are the same default denial.
+- `new?`/`edit?` re-tested when not overridden; `expect(policy.new?).to eq(policy.create?)`.
+- Nil-user examples, unless the policy explicitly handles nil (client-portal policies sometimes
+  do). Controllers authenticate first.
+- `superclass` checks, and roles that don't exist (`:supervisor`, `:owner`).
+- `create(:organization)` plus re-setting `current_tenant` in every file; use the default tenant.
 
-  context 'when user cannot create' do
-    let(:user) { create(:user, :therapist, organization: organization) }
+## Prove it, then report
 
-    it 'delegates to create? and denies access' do
-      expect(subject.new?).to eq(subject.create?)
-      expect(subject.new?).to be false
-    end
-  end
-end
-```
+Green, then coverage `--baseline` with no `lost_lines`. Probe the riskiest predicates, all KILLED:
 
-### Testing Multi-Tenancy and Cross-Organization Access
-```ruby
-context 'when user is from a different organization' do
-  let(:user) do
-    ActsAsTenant.without_tenant do
-      create(:user, :admin, organization: other_organization)
-    end
-  end
+- drop the relationship check (`assigned_client?(…)` → `true`);
+- widen a role list (`has_any_role?(:admin)` → `has_any_role?(:admin, :therapist)`);
+- in `Scope#resolve`, replace the filtered relation with `scope.all`.
 
-  it 'denies access across organizations' do
-    expect(subject.show?).to be false
-  end
-end
-```
-
-### Testing Assignment-Based Access
-```ruby
-context 'when user is a therapist' do
-  let(:user) { create(:user, :therapist, organization: organization) }
-
-  context 'when therapist is assigned to the record' do
-    before do
-      create(:assignment, user: user, record: record)
-    end
-
-    it 'allows access' do
-      expect(subject.show?).to be true
-    end
-  end
-
-  context 'when therapist is not assigned to the record' do
-    it 'denies access' do
-      expect(subject.show?).to be false
-    end
-  end
-end
-```
-
-### Testing Edge Cases
-```ruby
-describe 'edge cases' do
-  describe 'nil user' do
-    let(:user) { nil }
-
-    it 'raises NoMethodError or returns falsey when accessing policy methods' do
-      expect { subject.index? }.to raise_error(NoMethodError)
-      # Or for methods that handle nil gracefully:
-      # expect(subject.create?).to be_falsey
-    end
-  end
-
-  describe 'user with no roles' do
-    let(:user) { create(:user, organization: organization, role_names: []) }
-
-    it 'denies access' do
-      expect(subject.show?).to be false
-    end
-  end
-
-  describe 'user with multiple roles' do
-    let(:user) { create(:user, organization: organization, role_names: [:admin, :therapist]) }
-
-    it 'allows admin-level access' do
-      expect(subject.destroy?).to be true
-    end
-  end
-
-  describe 'soft-deleted records' do
-    let(:deleted_record) { create(:model, organization: organization, deleted_at: Time.current) }
-
-    context 'when user is admin' do
-      let(:user) { create(:user, :admin, organization: organization) }
-
-      it 'includes soft-deleted records in scope' do
-        scope = Pundit.policy_scope(user, Model)
-        expect(scope).to include(deleted_record)
-      end
-    end
-  end
-end
-```
-
-## Instructions for AI
-
-When the user provides a policy file path as `$ARGUMENTS`, follow this iterative workflow until ALL tests pass:
-
-### Phase 1: Analysis and Test Generation
-
-1. **Read the policy file** at `$ARGUMENTS`
-2. **Determine test file path**: Convert policy path to spec path
-   - `app/policies/foo_policy.rb` → `spec/policies/foo_policy_spec.rb`
-   - `app/policies/client_portal/foo_policy.rb` → `spec/policies/client_portal/foo_policy_spec.rb`
-3. **Check if spec file exists** at the determined path
-4. **Analyze the policy** to identify:
-   - Policy class name and inheritance (should inherit from ApplicationPolicy)
-   - All public policy methods (index?, show?, create?, update?, destroy?, custom methods)
-   - Delegated methods (new?, edit?)
-   - Role checks (has_role?, has_any_role?)
-   - Organization checks (user.organization == record.organization)
-   - Assignment/ownership checks (record.user == user, accessible_clients, etc.)
-   - Scope implementation (Scope#resolve)
-   - Special authorization logic (conditions, custom queries)
-5. **If test file exists**, read it and identify:
-   - What is already tested
-   - What is missing
-   - What needs improvement
-6. **Generate or update tests** following the patterns in this document
-7. **Ensure comprehensive coverage** of:
-   - All policy methods
-   - All roles in the application (admin, coordinator, therapist, supervisor, manager, biller)
-   - Edge cases
-   - Scope behavior
-8. **Use factories** defined in `spec/factories/` or suggest new ones
-
-### Phase 2: Iterative Test Execution and Fixes
-
-**CRITICAL: Do not stop until all tests pass. Repeat this loop until success:**
-
-1. **Run the tests** for the specific policy:
-   ```bash
-   bundle exec rspec spec/policies/policy_name_spec.rb
-   ```
-
-2. **Analyze test results**:
-   - If ALL tests pass → Report success and exit
-   - If ANY tests fail → Continue to step 3
-
-3. **For each test failure**:
-   - Read and understand the error message
-   - Identify the root cause:
-     - Missing factory attributes
-     - Incorrect test expectations
-     - Missing role assignments
-     - Incorrect organization setup
-     - Missing associated records (assignments, therapist relationships)
-     - Multi-tenant issues (ActsAsTenant.without_tenant needed)
-     - Incorrect use of Pundit.policy_scope vs PolicyClass::Scope.new
-
-4. **Fix the failure**:
-   - Update factory if needed
-   - Fix test expectations if they're incorrect
-   - Update test setup (add missing let! blocks, create associations)
-   - Fix multi-tenancy issues
-   - **DO NOT modify the policy unless there's a genuine bug**
-
-5. **Return to step 1** and run tests again
-
-### Phase 3: Final Verification
-
-Once all tests pass:
-
-1. **Run the full test suite** one more time to confirm
-2. **Provide a summary** including:
-   - Total number of examples and failures (should be 0 failures)
-   - What was fixed during the iteration
-   - Final test coverage breakdown
-   - Any recommendations for the policy or tests
-
-## Test Organization Checklist
-
-For every policy test file, verify:
-
-- [ ] `require 'rails_helper'` at top
-- [ ] `type: :policy` metadata
-- [ ] Multi-tenant setup with `ActsAsTenant.current_tenant`
-- [ ] Subject declaration appropriate for each describe block
-- [ ] Test all standard CRUD actions (index?, show?, create?, new?, update?, edit?, destroy?)
-- [ ] Test all custom policy methods
-- [ ] Test policy scope (Scope#resolve) for all relevant roles
-- [ ] Test all application roles (admin, coordinator, therapist, supervisor, manager, biller)
-- [ ] Test ownership and assignment-based access
-- [ ] Test cross-organization access (should deny)
-- [ ] Test inherited actions (new? → create?, edit? → update?)
-- [ ] Test edge cases (nil user, no roles, multiple roles, soft-deleted records)
-- [ ] Use `let` for lazy evaluation
-- [ ] Use `build` instead of `create` when possible
-- [ ] Use `ActsAsTenant.without_tenant` for cross-org scenarios
-- [ ] Test both positive (allows) and negative (denies) cases
-
-## Common Failure Patterns and Solutions
-
-1. **Factory validation failures**: Ensure factory has all required attributes
-2. **Role check failures**: Verify user has correct roles using `:admin`, `:therapist` traits
-3. **Association errors**: Create assignments, client_therapist records, or other relationships
-4. **Multi-tenant errors**: Always set `ActsAsTenant.current_tenant` in before block
-5. **Scope errors**: Use correct scope syntax (`Pundit.policy_scope` vs `PolicyClass::Scope.new`)
-6. **Organization mismatch**: Create cross-org records inside `ActsAsTenant.without_tenant` block
-7. **Nil user handling**: Some policies may not handle nil users gracefully - test both NoMethodError and falsey returns
-8. **Custom method coverage**: Don't forget to test all custom policy methods, not just CRUD actions
-
-## Common Policy Roles in the Application
-
-The application uses these roles (from lowest to highest privilege):
-
-- **biller**: Billing-related access only
-- **therapist**: Can view/manage assigned clients and appointments
-- **supervisor**: Like therapist, plus can supervise other therapists
-- **manager**: Can manage users and organizational resources
-- **coordinator**: Full operational access to clients and appointments
-- **admin**: Full system access including user management
-- **platform_admin**: Platform-level access across organizations (rare)
-
-## Authorization Patterns to Test
-
-1. **Role-based**: `user.has_role?(:admin)`
-2. **Multi-role**: `user.has_any_role?(:admin, :coordinator)`
-3. **Ownership**: `record.user == user`
-4. **Assignment**: `user.accessible_clients.include?(record)`
-5. **Organization**: `user.organization == record.organization`
-6. **Supervisor relationship**: `user.supervisees.include?(other_user)`
-7. **Manager relationship**: `user.managed_users.include?(other_user)`
-8. **Combined conditions**: Multiple checks with AND/OR logic
-
-## Best Practices from Pundit Documentation
-
-- **Use subject declaration**: Makes tests more readable and DRY
-- **Test scopes separately**: Scopes are just Ruby classes, test them thoroughly
-- **Avoid testing implementation**: Test authorization outcomes, not internal logic
-- **Use pundit-matchers gem patterns**: While not installed, follow similar patterns
-- **Test nil user behavior**: Document how policies handle missing authentication
-- **Test Rails 8 compatibility**: Ensure policies work with Current.user pattern
-
-## Sources
-
-Based on best practices from:
-- [Pundit GitHub](https://github.com/varvet/pundit)
-- [Pundit Matchers](https://github.com/pundit-community/pundit-matchers)
-- [Testing Pundit Policies with RSpec](https://www.thunderboltlabs.com/blog/2013/03/27/testing-pundit-policies-with-rspec/)
-- Existing policy test patterns in the application
+Lint with `bin/standardrb <spec>` and report per `test-quality.md` or the caller's format.

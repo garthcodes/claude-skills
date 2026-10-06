@@ -34,6 +34,22 @@ Fragment keys: use the record (`cache record`, which is key-based expiration on 
 | Large HTML | high `avg_kb` in the distribution section (>~200 KB is a lot of rendering) | paginate with Pagy, or put panels below the fold in a lazy Turbo Frame |
 | Unexplained Ruby time (controller ms well above sql + view ms) | none of the above | profile it: see SKILL.md Step 3 |
 
+## How speed fixes break pages
+
+A speed fix must not change what the page shows or who can see it. These are the ways it usually does. The plan, the reviews, the bug hunt and the cold review all check the diff against this list.
+
+| Fix | How it breaks | Check |
+|---|---|---|
+| `includes` + `where`/`references` on the association | becomes a JOIN: parents without children vanish, and the preloaded children are filtered | rows on the page before = after, including parents with no children |
+| Ruby filter/sum moved into SQL | Ruby saw the default scope (`active`, tenant) and `Time.zone`; raw SQL, `unscoped` or `DATE(col)` (UTC) don't. `SUM` of nothing is `nil`, not `0` | soft-deleted rows, another org's rows, evening records in the practice's zone, empty sets |
+| `pluck`, `select_all`, `find_by_sql` | skips model defaults, decryption, enums and `acts_as_tenant` when it's raw SQL | tenant and soft-delete conditions written out, or stay on the relation |
+| `count` → `size`, `exists?` → `load.any?` | the loaded rows are a page, or were filtered in Ruby, so the number changes | totals and "no results" states |
+| `distinct`, `group`, new `joins` | order changes; joins duplicate rows, which breaks pagination | order and row counts on page 1 and page 2 |
+| Memoization | stored on a class, constant or cached object outlives the request and leaks between users or orgs; memoized `nil`/`false` recomputes | per-request instance only, keyed by user when it varies |
+| Caching | key misses the tenant, role or a field that changes the output → stale or another user's data; PHI lands in Solid Cache | key covers everything the fragment reads; `touch: true` path busts it |
+| Lazy Turbo Frame / pagination | content no longer in the first paint; links, anchors, print, system specs and screen readers that expected it break | the moved content still reachable, and its specs still pass |
+| New index | unique index fails on existing prod duplicates; non-concurrent build locks a hot table | `algorithm: :concurrently`; duplicates counted through `bin/prod-sql` first |
+
 ## Reference points
 
 - Healthy Rails: median under ~100 ms, p95 under 1 s. A server time under ~300 ms leaves room for a page to be visible within 1 s, which is why the skill's "worth doing" gate is p50 300 ms / p95 1 s.
