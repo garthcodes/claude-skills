@@ -48,7 +48,7 @@ src = Dir["{app,lib,config}/**/*.{rb,erb,rake,yml}"].to_h { |f| [f, File.read(f)
 def churn_for(paths)
   return {} if paths.empty?
   counts = Hash.new(0)
-  out = `git log --since=180.days --name-only --format= -- #{paths.map { |p| "'#{p}'" }.join(" ")} 2>/dev/null`
+  out = IO.popen(["git", "log", "--since=180.days", "--name-only", "--format=", "--", *paths], err: File::NULL, &:read)
   out.each_line { |l| counts[l.strip] += 1 unless l.strip.empty? }
   counts
 end
