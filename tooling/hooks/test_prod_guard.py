@@ -57,6 +57,20 @@ ASKS = [
     "cat > deploy.sh <<'EOF'\nfly deploy\nEOF",
     "cat > notes.md <<'EOF'\nfly deploy\nEOF\nbash notes.md",
     "cat <<EOF | bash\nfly deploy\nEOF",
+    # text printed by an exempt command and run by another segment
+    "echo fly deploy | sh",
+    "echo flyadmin deploy | bash",
+    "printf 'fly deploy' | xargs -I{} sh -c {}",
+    "echo fly deploy | tee deploy.sh",
+    # git / gh can run commands themselves
+    'git -c core.sshCommand="fly deploy" fetch',
+    "git config alias.x '!fly deploy'",
+    "gh alias set x '!fly deploy' --shell",
+    "gh extension exec fly deploy",
+    # shell syntax that still runs fly
+    "fl\\\ny deploy",
+    "{fly,} deploy",
+    "$'fly' deploy",
     # gcloud / gsutil
     "gcloud secrets versions access latest --secret=x",
     "gcloud secrets versions add x --data-file=-",
@@ -79,6 +93,8 @@ ALLOWED = [
     'git commit -m "docs: explain fly deploy"',
     'gh pr create --title x --body "run flyadmin deploy after merge"',
     "cat > plan.md <<'EOF'\nfly deploy\nEOF",
+    'gh issue comment 12 --body "flyadmin deploy is next"',
+    "git log --grep fly",
     "gcloud projects list",
     "gsutil ls gs://bucket",
 ]
