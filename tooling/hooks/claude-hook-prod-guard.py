@@ -51,11 +51,13 @@ STAGING_TARGET = re.compile(
 SHELL_COMMENT = re.compile(r"(?:^|\s)#.*$")
 
 # Segments whose command word only reads or prints text. A fly word inside them is an argument
-# (`grep fly docs/`), not a command, unless the segment writes a file (`echo fly deploy > x.sh`) or
-# another segment of the same command can run that text (`echo fly deploy | sh`, see TEXT_RUNNERS).
+# (`grep fly docs/`), not a command. The exemption is all-or-nothing: it applies only when EVERY segment
+# of the command is text-only, so text printed by one part can never reach something that runs it
+# (`echo fly deploy | sh`, `| timeout 5 sh`, `| awk '{system($0)}'`, `| ssh host`). This is an allowlist
+# on purpose; a list of "commands that can run text" is never complete.
 TEXT_ONLY_COMMANDS = {
-    "grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf", "cat", "head", "tail", "less",
-    "wc", "ls",
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf", "cat", "head", "tail",
+    "wc", "ls", "sort", "uniq", "cut", "tr", "nl", "column", "cd", "pwd", "true",
 }
 # git and gh can run arbitrary commands (`git -c core.sshCommand=...`, `gh alias set --shell`), so only
 # these subcommands, written straight after the command word with no global option first, are text-only.
@@ -64,12 +66,11 @@ TEXT_ONLY_SUBCOMMANDS = {
     "gh": {"pr", "issue"},
 }
 TEXT_ONLY_GH_ACTIONS = {"create", "edit", "comment", "review", "view", "list"}
-# If any segment runs a shell, an interpreter or a command-runner, or writes stdin to a file, text
-# printed by another segment may be executed, so no segment of that command is treated as text-only.
-TEXT_RUNNERS = {
-    "sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "source", ".", "exec", "xargs", "env", "nohup",
-    "sudo", "time", "watch", "parallel", "python", "python3", "ruby", "perl", "node", "osascript", "tee",
-}
+# git options that run a program or write a file even under a text-only subcommand.
+GIT_EXEC_OPTIONS = re.compile(r"(?:^|\s)(?:--ext-diff|--textconv|--output\b|-O\S*|--open-files-in-pager\b)")
+
+# Shell expansions that can split a word the shell later joins: `fl$()y`, `fl${X}y`, `fl`true`y`.
+EXPANSION = re.compile(r"\$\([^()]*\)|\$\{[^{}]*\}|`[^`]*`")
 ASSIGNMENT = re.compile(r"^\w+=")
 PLACEHOLDER = re.compile(r"<[\w.-]+>")
 
@@ -158,7 +159,11 @@ def command_word(segment):
 
 
 def text_only(segment):
+    if not segment.strip():
+        return True
     if ">" in PLACEHOLDER.sub("", segment):  # writes a file (`<app-name>` is a placeholder, not a redirect)
+        return False
+    if ASSIGNMENT.match(segment.split()[0]):  # GIT_PAGER=…, GIT_EXTERNAL_DIFF=…, BROWSER=… run programs
         return False
     word = command_word(segment)
     if word in TEXT_ONLY_COMMANDS:
@@ -169,17 +174,17 @@ def text_only(segment):
     rest = words[words.index(next(w for w in words if not ASSIGNMENT.match(w))) + 1:]
     if not rest or rest[0] not in TEXT_ONLY_SUBCOMMANDS[word]:
         return False
-    return word != "gh" or (len(rest) > 1 and rest[1] in TEXT_ONLY_GH_ACTIONS)
-
-
-def runs_text(segments):
-    """True when some segment could execute text another segment prints (`... | sh`, `... | xargs`)."""
-    return any(command_word(segment) in TEXT_RUNNERS for segment in segments)
+    if word == "git":
+        return not GIT_EXEC_OPTIONS.search(segment)
+    return len(rest) > 1 and rest[1] in TEXT_ONLY_GH_ACTIONS
 
 
 def production_reason(command):
     """Return a short reason string if the command targets production, else None."""
     command = QUOTE_CHARS.sub("", strip_inert_heredoc_bodies(LINE_CONTINUATION.sub("", command)))
+    collapsed = EXPANSION.sub("", command)
+    if len(FLY_WORD.findall(collapsed)) > len(FLY_WORD.findall(command)):
+        return "fly command assembled from shell expansions"
     if PROD_APP_FLAG.search(command):
         return f"targets Fly app {PROD_APP}"
     if PRODUCTION_RESET.search(command):
@@ -188,8 +193,10 @@ def production_reason(command):
         return "bin/deploy without the staging argument deploys production"
 
     segments = SEGMENT_SPLIT.split(command)
-    exemptions_allowed = not runs_text(segments)
+    exemptions_allowed = all(text_only(segment) for segment in segments)
     for segment in segments:
+        if command_word(segment) == "git" and GIT_EXEC_OPTIONS.search(segment) and "fly" in segment:
+            return "git option that runs a program names fly"  # `git grep -Ofly`: no word boundary to match
         if exemptions_allowed and text_only(segment):
             continue
         fly = FLY_WORD.search(segment)

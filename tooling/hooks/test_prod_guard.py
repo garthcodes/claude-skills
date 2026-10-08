@@ -67,10 +67,18 @@ ASKS = [
     "git config alias.x '!fly deploy'",
     "gh alias set x '!fly deploy' --shell",
     "gh extension exec fly deploy",
+    "echo fly deploy | awk '{system($0)}'",
+    "echo fly deploy | timeout 5 sh",
+    "echo fly deploy | ssh build-host",
+    "GIT_EXTERNAL_DIFF=flyadmin git diff --ext-diff",
+    "git grep -Ofly deploy",
     # shell syntax that still runs fly
     "fl\\\ny deploy",
     "{fly,} deploy",
     "$'fly' deploy",
+    "fl$()y deploy",
+    "fl${X}y deploy",
+    'fl"$(true)"y deploy',
     # gcloud / gsutil
     "gcloud secrets versions access latest --secret=x",
     "gcloud secrets versions add x --data-file=-",
@@ -95,6 +103,8 @@ ALLOWED = [
     "cat > plan.md <<'EOF'\nfly deploy\nEOF",
     'gh issue comment 12 --body "flyadmin deploy is next"',
     "git log --grep fly",
+    "grep -rn flyadmin skills/ | sort | head",
+    "cd docs && grep -n 'fly deploy' runbook.md",
     "gcloud projects list",
     "gsutil ls gs://bucket",
 ]
