@@ -66,6 +66,13 @@ TEXT_ONLY_SUBCOMMANDS = {
     "gh": {"pr", "issue"},
 }
 TEXT_ONLY_GH_ACTIONS = {"create", "edit", "comment", "review", "view", "list"}
+# Options that make a text command run a program (`rg --pre=cmd`, `sort --compress-program=cmd`,
+# `ag/ack --pager=cmd`): a segment carrying one is not text-only.
+TEXT_EXEC_OPTIONS = re.compile(r"(?:^|\s)--(?:pre|compress-program|pager)\b")
+
+# ANSI-C quoting `$'...'` turns `\x66`, `\146` and similar escapes into characters before the word runs.
+ANSI_C_STRING = re.compile(r"\$'((?:[^'\\]|\\.)*)'")
+
 # git options that run a program or write a file even under a text-only subcommand.
 GIT_EXEC_OPTIONS = re.compile(r"(?:^|\s)(?:--ext-diff|--textconv|--output\b|-O\S*|--open-files-in-pager\b)")
 
@@ -165,6 +172,8 @@ def text_only(segment):
         return False
     if ASSIGNMENT.match(segment.split()[0]):  # GIT_PAGER=…, GIT_EXTERNAL_DIFF=…, BROWSER=… run programs
         return False
+    if TEXT_EXEC_OPTIONS.search(segment):
+        return False
     word = command_word(segment)
     if word in TEXT_ONLY_COMMANDS:
         return True
@@ -179,8 +188,19 @@ def text_only(segment):
     return len(rest) > 1 and rest[1] in TEXT_ONLY_GH_ACTIONS
 
 
+def decode_ansi_c(command):
+    """Replace each `$'...'` string with the text the shell will produce from it."""
+    def decode(match):
+        try:
+            return match.group(1).encode("latin-1", "backslashreplace").decode("unicode_escape")
+        except UnicodeDecodeError:
+            return match.group(0)  # undecodable: leave it, the patterns still see the raw text
+    return ANSI_C_STRING.sub(decode, command)
+
+
 def production_reason(command):
     """Return a short reason string if the command targets production, else None."""
+    command = decode_ansi_c(command)
     command = QUOTE_CHARS.sub("", strip_inert_heredoc_bodies(LINE_CONTINUATION.sub("", command)))
     collapsed = EXPANSION.sub("", command)
     if len(FLY_WORD.findall(collapsed)) > len(FLY_WORD.findall(command)):

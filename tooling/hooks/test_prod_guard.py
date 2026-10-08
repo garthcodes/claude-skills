@@ -77,6 +77,10 @@ ASKS = [
     "{fly,} deploy",
     "$'fly' deploy",
     "fl$()y deploy",
+    "$'\\x66ly' deploy",
+    "$'\\146ly' deploy",
+    "rg --pre=flyadmin deploy .",
+    "sort --compress-program=fly notes.txt",
     "fl${X}y deploy",
     'fl"$(true)"y deploy',
     # gcloud / gsutil
