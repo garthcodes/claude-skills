@@ -1,4 +1,5 @@
 ---
+name: plan-questions
 description: Collaboratively design and architect a feature through guided question-driven discovery
 argument-hint: [feature or problem description]
 ---

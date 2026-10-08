@@ -1,12 +1,12 @@
 ---
 name: resolve-issues
-description: Orchestrator that turns a batch of GitHub issues into one PR each by running /resolve-issue on every issue — by default every open issue labeled `honeybadger` that has no PR yet (the ones /fix-honeybadger triage files), urgent first, one isolated sub-agent per issue, up to 3 building at once with bin/ci serialized through a single CI slot, worktrees removed once their PR is open, a ledger for resume, cold-review carry lines handed from earlier issues to later ones, and a final table of PRs. Use whenever the user says "/resolve-issues", "resolve all the honeybadger issues", "run /resolve-issue on each of them", "work through the issues the triage filed", "a PR for every open bug issue", or names several issue numbers to take to PRs. For a single issue use /resolve-issue instead.
+description: Orchestrator that turns a hand-picked batch of GitHub issues into one PR each by running /resolve-issue on every issue — the issue numbers given, or every open issue with a named label (label:<name>) that has no PR yet, skipping anything the app's autofix queue owns (labeled autofix or autofix-queue), urgent first, one isolated sub-agent per issue, up to 3 building at once with bin/ci serialized through a single CI slot, worktrees removed once their PR is open, a ledger for resume, cold-review carry lines handed from earlier issues to later ones, and a final table of PRs. Use whenever the user says "/resolve-issues", "resolve all the honeybadger issues", "run /resolve-issue on each of them", "work through the issues the triage filed", "a PR for every open bug issue", or names several issue numbers to take to PRs. For a single issue use /resolve-issue instead.
 argument-hint: [dry-run] [label:<name> | <issue numbers…>] [max:<n>] [parallel:<n>]
 ---
 
 # Resolve Issues
 
-One run = a queue of GitHub issues → one `/resolve-issue` sub-agent per issue, up to `parallel` of them building at once → one PR per issue, and a table at the end. `/fix-honeybadger triage` files the issues; this skill drains them.
+One run = a queue of GitHub issues → one `/resolve-issue` sub-agent per issue, up to `parallel` of them building at once → one PR per issue, and a table at the end. You pick the batch: explicit issue numbers or a named label. The automatic queue (faults and `autofix-queue` issues) belongs to the app's autofix dispatcher, which builds them in the cloud; this skill never touches those, so the two never build the same issue.
 
 Only `bin/ci` is serialized (CLAUDE.md: one at a time on this machine). Investigate → plan → code → specs → reviews overlap freely; each sub-agent takes the single **CI slot** (`scripts/ci-slot`) for its `bin/ci` → `/green-ci` → re-run, and gives it back.
 
@@ -18,9 +18,10 @@ There are no approval stops. The user reads the PRs and the cold-review comments
 
 `$ARGUMENTS`, any of these, in any order:
 
-- **nothing** → every open issue labeled `honeybadger` with no open PR.
-- **`label:<name>`** → the same, for another label.
+- **nothing** → print the usage line (`/resolve-issues <issue numbers…> | label:<name>`) and stop. There is no default batch any more: the honeybadger issues are the autofix dispatcher's.
+- **`label:<name>`** → every open issue with that label and no open PR.
 - **issue numbers** (`524 531 #535`, or issue URLs) → exactly those, in the order given. Issues with an open PR are still skipped.
+- Either way, issues labeled `autofix` (a cloud run has or had it) or `autofix-queue` (waiting for one) are skipped with that reason in the ledger.
 - **`max:<n>`** → stop after `n` issues have been attempted (a first run with `max:2` is a cheap way to see the shape before an overnight batch).
 - **`parallel:<n>`** → how many sub-agents build at once (default **3**). `parallel:1` is the old one-at-a-time run. More than 4 mostly adds CI-slot waiting and machine load (every `/test-changed` runs mutation-probe rspecs).
 - **`dry-run`** → print the queue, lanes and skips, spawn nothing, stop.
@@ -45,10 +46,11 @@ cd $MAIN_DIR && git rev-parse --show-toplevel && gh auth status && git fetch ori
 ## Step 2: Build the queue
 
 ```bash
-gh issue list --label honeybadger --state open --limit 100 --json number,title,body,url
+gh issue list --label <name> --state open --limit 100 --json number,title,body,url,labels   # label:<name>
+gh issue view <N> --json number,title,body,url,labels,state                                # each given number
 ```
 
-For every candidate, in one pass:
+Skip issues labeled `grouped`: `/group-issues` folded them into a combined issue (their comment names it), which is built instead. Skip issues labeled `autofix` or `autofix-queue`: the autofix dispatcher owns them. For every other candidate, in one pass:
 
 1. **Open PR already?** `gh issue view <N> --json closedByPullRequestsReferences` lists PRs that say `Closes #N`; also `gh pr list --head issue_<N> --state open --json number,url,isDraft`. Any open PR → skip, with the PR link. This is also how re-running after an interrupted batch picks up where it left off: finished issues have PRs, so they fall out of the queue on their own.
 2. **Priority.** A body line `**Priority:** urgent …` puts the issue in the urgent group. Urgent first, then the rest; inside a group, lowest number first (oldest filing). Issue numbers given as arguments keep the user's order instead.
@@ -60,7 +62,7 @@ Write the ledger:
 ```markdown
 # /resolve-issues — <date> <time>
 
-Filter: label:honeybadger · max: none · parallel: 3 · started from main at <sha>
+Filter: label:bug · max: none · parallel: 3 · started from main at <sha>
 
 | # | Issue | Title | Lane | Status | PR | Note |
 |---|---|---|---|---|---|---|

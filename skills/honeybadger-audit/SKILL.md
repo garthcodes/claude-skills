@@ -1,4 +1,5 @@
 ---
+name: honeybadger-audit
 description: Audit a file for missing Honeybadger notifications alongside error logging
 argument-hint: <file-path-or-directory>
 ---

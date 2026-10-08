@@ -1,4 +1,5 @@
 ---
+name: worktree
 description: Create a git worktree and open it in a new VSCode window
 argument-hint: <worktree-name>
 allowed-tools: Bash(git worktree:*), Bash(git branch:*), Bash(git status:*), Bash(open:*), Bash(ls:*), Bash(pwd:*), Bash(cp:*), Bash(mkdir:*), Bash(echo:*), Bash(grep:*), Bash(tr:*), Bash(cut:*), Bash(cd:*), Bash(bin/rails:*), Bash(dropdb:*)
@@ -23,7 +24,7 @@ First, validate the environment:
 ## Worktree Creation Strategy
 
 Create the worktree using the following approach:
-1. **Location**: Create worktree in a sibling directory: `../<repo-name>-$1` (e.g. if the repo
+1. **Location**: Create worktree in a sibling directory: `../<repo>-$1` (e.g. if the repo
    directory is `myapp`, use `../myapp-$1`)
 2. **Branch**: Create a new branch named `$1` for the worktree
 3. **Base Branch**: Use the current main branch (`main`) as the base
@@ -42,10 +43,10 @@ Create the worktree using the following approach:
 
 3. **Create the git worktree**:
    ```bash
-   git worktree add ../<repo-name>-$1 -b $1 main
+   git worktree add ../<repo>-$1 -b $1 main
    ```
    This creates:
-   - A new directory at `../<repo-name>-$1`
+   - A new directory at `../<repo>-$1`
    - A new branch named `$1` based on `main`
    - Checks out the new branch in the worktree
 
@@ -57,7 +58,7 @@ Create the worktree using the following approach:
    - The development server may require SSL certificates that are in `.gitignore`
    - Copy from the main repository to the new worktree:
    ```bash
-   cp -r <main-repo>/config/certs ../<repo-name>-$1/config/
+   cp -r <main-repo>/config/certs ../<repo>-$1/config/
    ```
    - This enables `bin/dev` to start with HTTPS support
 
@@ -65,7 +66,7 @@ Create the worktree using the following approach:
    - The `.env` file contains required environment variables (API keys, etc.) and is in `.gitignore`
    - Copy from the main repository to the new worktree:
    ```bash
-   cp <main-repo>/.env ../<repo-name>-$1/.env
+   cp <main-repo>/.env ../<repo>-$1/.env
    ```
    - This ensures all environment variables are available in the new worktree
 
@@ -82,9 +83,9 @@ Create the worktree using the following approach:
    ```bash
    DB_SUFFIX="_$(echo "$1" | tr '-' '_' | tr -cd 'a-z0-9_' | cut -c1-30)"
    # printf's leading newline matters: .env may not end in one, and a glued-on line is ignored
-   printf '\nDATABASE_SUFFIX=%s\n' "$DB_SUFFIX" >> ../<repo-name>-$1/.env
+   printf '\nDATABASE_SUFFIX=%s\n' "$DB_SUFFIX" >> ../<repo>-$1/.env
 
-   cd ../<repo-name>-$1
+   cd ../<repo>-$1
    grep -E '^DATABASE_SUFFIX=' .env || { echo "DATABASE_SUFFIX not on its own line — fix .env" >&2; exit 1; }
    bin/rails db:create db:schema:load   # <app>_development${DB_SUFFIX} + <app>_test${DB_SUFFIX}
    bin/rails db:seed                    # use a small seed profile here if your app has one
@@ -94,7 +95,7 @@ Create the worktree using the following approach:
 
 8. **Open in VSCode**:
    - Use the `open` command to launch VSCode with the new worktree
-   - Command: `open -a "Visual Studio Code" ../<repo-name>-$1`
+   - Command: `open -a "Visual Studio Code" ../<repo>-$1`
    - This opens a new VSCode window with the worktree directory
 
 ## Error Handling
@@ -112,7 +113,7 @@ Handle common issues:
 ## Success Confirmation
 
 After successful creation:
-1. Confirm the worktree was created at `../<repo-name>-$1`
+1. Confirm the worktree was created at `../<repo>-$1`
 2. Confirm the branch `$1` was created
 3. Confirm SSL certificates were copied
 4. Confirm `.env` file was copied (including the `DATABASE_SUFFIX` line)
@@ -123,8 +124,8 @@ After successful creation:
    - Removing the worktree when done — drop the isolated databases FIRST (while the
      worktree's `.env` still exists), then remove the worktree:
      ```bash
-     cd ../<repo-name>-$1 && bin/rails db:drop   # drops <app>_development${DB_SUFFIX} and <app>_test${DB_SUFFIX}
-     cd <main-repo> && git worktree remove ../<repo-name>-$1
+     cd ../<repo>-$1 && bin/rails db:drop   # drops <app>_development${DB_SUFFIX} and <app>_test${DB_SUFFIX}
+     cd <main-repo> && git worktree remove ../<repo>-$1
      ```
      (If the worktree was already removed, drop leftovers with `dropdb <name>` —
      find them with `psql -lqt | grep <app>_`)

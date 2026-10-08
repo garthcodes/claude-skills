@@ -1,4 +1,5 @@
 ---
+name: bug-hunt-fix
 description: Fix a bug from bug-hunt and verify the fix using Playwright browser automation
 argument-hint: <path-to-bug-file.md>
 ---

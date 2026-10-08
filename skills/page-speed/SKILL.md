@@ -8,7 +8,7 @@ argument-hint: "[controller#action to force a page | 'refresh' to only update th
 
 One run = pick one page, find out why it's slow, show the user a 30-second plan in the terminal, and when they say so build it through a review-and-test chain that proves the page is faster *and still shows the same thing*, then record it. A speed fix that changes what a page shows is worse than a slow page, so the soundness steps (Steps 5–12) are the bulk of the run, not an afterthought. The log keeps this a rotation, so the same page isn't re-polished every run. It is also the only long-term record: Rails Pulse keeps 30 days of data, so any number not written down is lost.
 
-All production reads go through `bin/prod-sql` (read-only `claude-ro`, allow-listed, no prompt). If the tunnel fails, ask the user to turn on WireGuard and stop. Never try another route.
+All production reads go through `bin/prod-sql` (a read-only database role, allow-listed, no prompt). If the tunnel fails, ask the user to turn on WireGuard and stop. Never try another route.
 
 ## Files
 
@@ -18,7 +18,7 @@ All production reads go through `bin/prod-sql` (read-only `claude-ro`, allow-lis
 | `queries/drilldown.sql` | Where one page's time goes: a stall-free distribution (with `sql_per_load`), operation types, top SQL/partials with N+1 counts and file:line, slowest loads. `-v action='x#y' -v days=14` |
 | `queries/shared_ops.sql` | Operations that show up on 5+ pages (tenant lookup, role checks, layout partials), ranked by total seconds. `-v days=14` |
 | `queries/stalls.sql` | App-wide stall minutes, and whether jobs slowed too (DB) or not (web machine). `-v days=14` |
-| `queries/page_window.sql` | Stall-free hits/p50/p95/`sql_per_load` between two UTC times, plus deploys (MST and UTC). `-v action=… -v from=… -v to=now` |
+| `queries/page_window.sql` | Stall-free hits/p50/p95/`sql_per_load` between two UTC times, plus deploys (local time and UTC). `-v action=… -v from=… -v to=now` |
 | `queries/trend.sql` | One-row app-wide snapshot for the Trend table. `-v days=7` |
 | `patterns.md` | Known causes of slow pages: how each shows up in the drilldown, what to grep for, the fix. Its **How speed fixes break pages** table is the risk list every review step checks against |
 | `log_template.md` | Starting content for `docs/PAGE_PERFORMANCE_LOG.md` |
@@ -40,12 +40,12 @@ TOP=$(git rev-parse --show-toplevel)
 
 **Case A — already in a worktree** (`$TOP` is not `$MAIN_DIR`): this is the run's worktree. Never create a second one.
 
-- `WT=$TOP`, `BRANCH=$(git -C $WT branch --show-current)`. Keep the branch name (`/worktree` names it after its argument, not `perf/…`). If `BRANCH` is `main` or empty (detached), stop: the PR needs its own branch.
-- `/worktree` branches from the **local** `main`, which can be days behind. If the branch has no commits of its own and a clean tree (`git -C $WT log --oneline origin/main..HEAD` and `git status --short` both empty after `git -C $WT fetch origin main`), bring it up to date with `git -C $WT merge --ff-only origin/main`. Otherwise leave it: commits ahead will be part of the PR (say so), uncommitted changes are the user's, and `/merge-main` catches up in Step 10.
+- `WT=$TOP`, `BRANCH=$(git -C "$WT" branch --show-current)`. Keep the branch name (`/worktree` names it after its argument, not `perf/…`). If `BRANCH` is `main` or empty (detached), stop: the PR needs its own branch.
+- `/worktree` branches from the **local** `main`, which can be days behind. If the branch has no commits of its own and a clean tree (`git -C "$WT" log --oneline origin/main..HEAD` and `git status --short` both empty after `git -C "$WT" fetch origin main`), bring it up to date with `git -C "$WT" merge --ff-only origin/main`. Otherwise leave it: commits ahead will be part of the PR (say so), uncommitted changes are the user's, and `/merge-main` catches up in Step 10.
 - Fill in only what's missing, never redo what's there:
-  - no `.env`: `cp $MAIN_DIR/.env $WT/.env && cp -r $MAIN_DIR/config/certs $WT/config/`, then strip `DATABASE_SUFFIX=` and `PORT=` lines from the copy;
+  - no `.env`: `cp "$MAIN_DIR/.env" "$WT/.env" && cp -r "$MAIN_DIR/config/certs" "$WT/config/"`, then strip `DATABASE_SUFFIX=` and `PORT=` lines from the copy;
   - no `DATABASE_SUFFIX=` line: derive one from the directory name (`<app>-foo-bar` → `_foo_bar`), append it (`printf '\nDATABASE_SUFFIX=%s\n' …`, leading newline on purpose); Step 5 then creates the databases;
-  - no `PORT=` line (`/worktree` doesn't assign one, so it would serve on 3001 and collide with the main checkout's server): `cd $WT && bin/worktree-port --assign .env`.
+  - no `PORT=` line (`/worktree` doesn't assign one, so it would serve on 3001 and collide with the main checkout's server): `cd "$WT" && bin/worktree-port --assign .env`.
 
 **Case B — in the main checkout**: Steps 1–4 read from the main checkout (after `git fetch origin main`, read the log as `git show origin/main:docs/PAGE_PERFORMANCE_LOG.md` so it's current), and Step 5 creates `.claude/worktrees/page-speed-<slug>` once the page is known.
 
@@ -58,7 +58,7 @@ Read `docs/PAGE_PERFORMANCE_LOG.md` (copy `log_template.md` if it doesn't exist)
 For each roster or Shared row with status `shipped`:
 
 1. Get the merge commit (`gh pr view <n> --json mergeCommit,mergedAt`). It is deployed once some `rails_pulse_deployments.revision` contains it (`git fetch` then `git merge-base --is-ancestor <sha> <revision>`).
-2. Once it's deployed and there are ≥ 3 days and ≥ 20 hits since, run `page_window.sql` from the deploy time (`started_utc`), fill in **After** as `p50 / p95 · N q`, and set `measured`. Judge the fix mainly by `sql_per_load`. Traffic and client data keep growing (SP imports), so p50 can drift up even when the fix worked, but queries per load only move when the code changes. If queries dropped and p50 didn't, say both. If neither improved, say so plainly in the run entry. That's a result too.
+2. Once it's deployed and there are ≥ 3 days and ≥ 20 hits since, run `page_window.sql` from the deploy time (`started_utc`), fill in **After** as `p50 / p95 · N q`, and set `measured`. Judge the fix mainly by `sql_per_load`. Traffic and client data keep growing (data imports), so p50 can drift up even when the fix worked, but queries per load only move when the code changes. If queries dropped and p50 didn't, say both. If neither improved, say so plainly in the run entry. That's a result too.
 3. Otherwise leave it as `shipped`.
 
 `sql_per_load` needs `ops_loads` ≥ 20. A Before logged without `· q` can't be backfilled because the operation rows are gone, so compare p50/p95 only and say so.
@@ -100,7 +100,7 @@ Write the plan in the terminal and **stop**. The user replies "implement", or te
 
 If they decline the whole plan, give the page `skip until` today + 30 days in the roster (with the reason in a one-line run entry), and put that plus the Step 1 updates on a small PR (from the worktree's branch in Case A, or a `chore/page-speed-log-<date>` branch in Case B). Otherwise the next run proposes the same page again.
 
-The user should grasp it in about 30 seconds, so use tables and short lines, not paragraphs. Aim for about 20 lines. Explain it for a smart 18-year-old: plain words in the "why" column, with jargon defined in passing ("an N+1: one database trip per row instead of one for all rows"). Add an analogy only where it really helps, one line at most. All numbers are stall-free, and each one names its window (ranking and load times: 14 d; SQL and operations: since `ops_since`; trend: 7 d), so never mix windows in one sentence. Show times in the practice's local zone (the queries use America/Phoenix — change it to yours) as MM/DD h:mm AM/PM, not UTC. The queries already print local-time columns, so copy those rather than converting by hand. Use this shape:
+The user should grasp it in about 30 seconds, so use tables and short lines, not paragraphs. Aim for about 20 lines. Explain it for a smart 18-year-old: plain words in the "why" column, with jargon defined in passing ("an N+1: one database trip per row instead of one for all rows"). Add an analogy only where it really helps, one line at most. All numbers are stall-free, and each one names its window (ranking and load times: 14 d; SQL and operations: since `ops_since`; trend: 7 d), so never mix windows in one sentence. Show times in the practice's local zone (pass `-v tz=<IANA zone>` to the queries that print times; they default to UTC) as MM/DD h:mm AM/PM, not UTC. The queries already print local-time columns, so copy those rather than converting by hand. Use this shape:
 
 ```
 **Client list** (`clients#index`): typical 0.9 s · 1 in 20 over 2.6 s · 41% of loads over 1 s · 140 loads / 14 d
@@ -121,7 +121,7 @@ Picked: most waiting in the app (96 s / 14 d). Skipped: Chart (resting), Invoice
 Expected: 0.9 s → ~0.4 s typical. Each change gets a spec proving the query count no longer grows with rows.
 Risk check (patterns.md): #1 preloads only — no rows can drop · #2 SQL sum keeps the `active` scope and returns 0 for no invoices.
 After **implement**: architect review → build → specs → full review → simplify → bug hunt (+ fixes) → bin/ci → PR + cold review.
-Also noticed: app-wide stall 03/04 2:10 PM MST (jobs normal → web machine, not DB).
+Also noticed: app-wide stall 03/04 2:10 PM (jobs normal → web machine, not DB).
 
 Reply **implement**, or tell me what to change.
 ```
@@ -160,10 +160,10 @@ The early stops are the same as `/resolve-issue`'s: the fix turns out to need a 
 
 ```bash
 SLUG=<action with # and / turned into ->   # e.g. appointments-index; shared-<name> for a shared cost
-cd $MAIN_DIR && git fetch origin main
+cd "$MAIN_DIR" && git fetch origin main
 git worktree add .claude/worktrees/page-speed-$SLUG -b perf/$SLUG origin/main
 WT=$MAIN_DIR/.claude/worktrees/page-speed-$SLUG; BRANCH=perf/$SLUG
-cd $WT
+cd "$WT"
 cp -r ../../../config/certs ./config/ && cp ../../../.env ./.env
 sed -i '' '/^DATABASE_SUFFIX=/d;/^PORT=/d' .env
 # printf's leading newline matters: .env may not end in one, and a glued-on line is ignored
@@ -177,7 +177,7 @@ In Case A, set `SLUG` the same way (it names the bug-report folder and the CI sl
 **Both cases — load the full seed.** `/worktree` loads only `db:seed:mini`, which is too thin for this run: the bug hunt and the snapshot need enough rows for N+1s, pagination and empty-vs-full states to show. The worktree's databases are its own, so reload them, guarded:
 
 ```bash
-cd $WT && SUFFIX=$(grep -E '^DATABASE_SUFFIX=' .env | cut -d= -f2)
+cd "$WT" && SUFFIX=$(grep -E '^DATABASE_SUFFIX=' .env | cut -d= -f2)
 # Refuse unless Rails really points at the suffixed database —
 # schema:load against the shared <app>_development would wipe it.
 bin/rails runner "n = ActiveRecord::Base.connection_db_config.database; abort(\"unsuffixed DB: #{n}\") unless n.end_with?(\"$SUFFIX\")" \
@@ -186,7 +186,7 @@ bin/rails runner "n = ActiveRecord::Base.connection_db_config.database; abort(\"
 
 `db:seed` takes ~1 min. If `bin/rails` fails on missing gems, `bundle install` in `$WT` once and retry. Never drop the `DATABASE_SUFFIX` line to get past a failure. Never share `<app>_development`/`<app>_test` with the main checkout. Use absolute `$WT` paths from here on.
 
-**Before snapshot.** The worktree has none of this run's changes yet, so this is the one moment you can record what the page shows *before* any change. Start the worktree's server, stopping one already running there first so it picks up the new data (`cd $WT && nohup bin/dev > tmp/dev.log 2>&1 &`, URL from `env -u PORT bin/dev-url`) and save the visible text of the page's main content to `$WT/tmp/page-speed/before/<name>.txt` for 2–4 URLs that exercise the changed code: a long list, a filtered or second page, an empty state, and each role that sees the page differently (a therapist and an admin often see different rows). Write the URL and user at the top of each file. This is what Step 9 compares against, and it catches the worst speed-fix bug: rows that quietly vanish or a total that changes.
+**Before snapshot.** The worktree has none of this run's changes yet, so this is the one moment you can record what the page shows *before* any change. Start the worktree's server, stopping one already running there first so it picks up the new data (`cd "$WT" && nohup bin/dev > tmp/dev.log 2>&1 &`, URL from `env -u PORT bin/dev-url`) and save the visible text of the page's main content to `$WT/tmp/page-speed/before/<name>.txt` for 2–4 URLs that exercise the changed code: a long list, a filtered or second page, an empty state, and each role that sees the page differently (a therapist and an admin often see different rows). Write the URL and user at the top of each file. This is what Step 9 compares against, and it catches the worst speed-fix bug: rows that quietly vanish or a total that changes.
 
 Browser notes (they cost minutes each to rediscover): Playwright MCP rejects the mkcert certificate on worktree servers, so use Selenium MCP headless Chrome with `--ignore-certificate-errors --allow-insecure-localhost --window-size=1280,800`. Sign in by minting a token: `bin/rails runner 'User.find_by!(email: "therapist@example.com").update_columns(magic_link_token: "ps-1", magic_link_sent_at: Time.current)'`, then visit `/passwordless/users/magic_link?email=therapist@example.com&token=ps-1`. Therapist users may have blocking CPT/outcome modals; clear them with `update_columns` in `bin/rails runner` and `Rails.cache.clear`. If no browser can reach the server, take the snapshot as the rendered HTML from an integration session in `bin/rails runner` instead, and say so in the PR.
 
@@ -211,7 +211,7 @@ Two kinds of spec, both run green:
 Then `/test-changed` in `$WT` (base `main`) for the changed models, services, components, policies and jobs. Run what the change touches:
 
 ```bash
-cd $WT
+cd "$WT"
 bundle exec rspec <every spec added or changed, plus the existing specs of changed app files>
 bin/standardrb <changed .rb files>                  # never bare `bundle exec standardrb`
 npx prettier --check <changed app/javascript files>  # only if JS changed
@@ -266,9 +266,9 @@ Otherwise **every** bug and observation in its `INDEX.md` gets fixed in this PR,
 2. `bin/ci` in `$WT`, one at a time on this machine, holding the shared CI slot:
 
 ```bash
-$MAIN_DIR/.claude/skills/resolve-issues/scripts/ci-slot acquire page-speed-$SLUG   # run in the background; it wakes you when the slot is yours
-cd $WT && bin/ci > tmp/ci.log 2>&1
-$MAIN_DIR/.claude/skills/resolve-issues/scripts/ci-slot release page-speed-$SLUG   # after the last bin/ci of this step, red or green
+"$MAIN_DIR/.claude/skills/resolve-issues/scripts/ci-slot" acquire page-speed-$SLUG   # run in the background; it wakes you when the slot is yours
+cd "$WT" && bin/ci > tmp/ci.log 2>&1
+"$MAIN_DIR/.claude/skills/resolve-issues/scripts/ci-slot" release page-speed-$SLUG   # after the last bin/ci of this step, red or green
 ```
 
 Read `tmp/ci.log` afterwards (`grep -nE "examples,|^rspec \./|Failures:|FAILED|error" tmp/ci.log`); never pipe a running `bin/ci` through `grep`/`tail`.
@@ -289,7 +289,7 @@ Edit `docs/PAGE_PERFORMANCE_LOG.md` on the branch:
 Stage specific paths (never `-A`; never the review artifacts or `tmp/`), end each commit message with the session's attribution line, push, and open the PR:
 
 ```bash
-cd $WT && git push -u origin $BRANCH
+cd "$WT" && git push -u origin $BRANCH
 gh pr create --title "perf: speed up <page name>" --body-file <scratchpad>/page-speed-$SLUG-pr.md
 ```
 
@@ -342,10 +342,10 @@ Follow `.claude/skills/resolve-issue/references/cold-review.md` with:
 Keep the worktree (the user tests in it; `/worktree-sweep` cleans up later) and its server running. In Case B, open it (in Case A it's already open):
 
 ```bash
-open -n -a "Visual Studio Code" $WT
+open -n -a "Visual Studio Code" "$WT"
 ```
 
-Finish with these lines and nothing else: the PR link (say "draft" and why if Step 9 left a bug unfixed or Step 12 stopped it); the worktree's URL (`cd $WT && env -u PORT bin/dev-url`); the chain's counts (architect, full-review, simplify, bug hunt found/new/pre-existing/fixed, before snapshot identical or not); `bin/ci` green against which main SHA, plus anything skipped and why; the cold review (comment link, tag counts, what each `verify` check found); what's next in the rotation.
+Finish with these lines and nothing else: the PR link (say "draft" and why if Step 9 left a bug unfixed or Step 12 stopped it); the worktree's URL (`cd "$WT" && env -u PORT bin/dev-url`); the chain's counts (architect, full-review, simplify, bug hunt found/new/pre-existing/fixed, before snapshot identical or not); `bin/ci` green against which main SHA, plus anything skipped and why; the cold review (comment link, tag counts, what each `verify` check found); what's next in the rotation.
 
 ## Guardrails
 

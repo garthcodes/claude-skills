@@ -82,7 +82,7 @@ Fix failures introduced by this branch (max 3 cycles; delegate a non-trivial fix
 failing spec paths and their output — direct edits are fine for one-liners). Pre-existing failures on
 files this branch didn't touch: note them, don't chase them (memory: UTC date-boundary flakes in
 `upsert_session_outcome_tasks_service_spec`, `generate_claim_for_appointment_service_spec`,
-`recurring_appointment_service_spec` between 17:00 and midnight MST — confirm in `${PRIMARY_DIR}` if seen).
+`recurring_appointment_service_spec` in the evening hours when the local date and the UTC date differ — confirm in `${PRIMARY_DIR}` if seen).
 
 The wave commits already hold the implementation; commit whatever this step fixed (skip if
 nothing changed):

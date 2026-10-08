@@ -24,7 +24,7 @@ WT       = $MAIN_DIR/../<app>-<SLUG>
 SUFFIX   = _<SLUG with - replaced by _>
 ```
 
-Siblings named `../<app>-*` are what `/worktree-sweep` cleans up. From Step 2 on, **every** read, edit, search, test, lint and git command uses absolute `$WT` paths (or `cd $WT && …`). The session's cwd stays in the main checkout, so a relative path silently edits `main`. That's the most likely mistake in this skill, so double-check paths.
+Siblings named `../<app>-*` are what `/worktree-sweep` cleans up. From Step 2 on, **every** read, edit, search, test, lint and git command uses absolute `$WT` paths (or `cd "$WT" && …`). The session's cwd stays in the main checkout, so a relative path silently edits `main`. That's the most likely mistake in this skill, so double-check paths.
 
 ## Step 1: Size check (quick)
 
@@ -37,15 +37,15 @@ If so, say so in two lines and suggest `/prd` → `/build-feature`. Stop unless 
 
 ## Step 2: Set up the worktree
 
-If `$WT` already exists, **reuse it**: check `git -C $WT status` and `git -C $WT log --oneline origin/main..HEAD`, say what's there, and skip to Step 3. Never delete or reset existing work.
+If `$WT` already exists, **reuse it**: check `git -C "$WT" status` and `git -C "$WT" log --oneline origin/main..HEAD`, say what's there, and skip to Step 3. Never delete or reset existing work.
 
 Otherwise:
 
 ```bash
-cd $MAIN_DIR && git fetch origin main
+cd "$MAIN_DIR" && git fetch origin main
 git worktree add ../<app>-<SLUG> -b tweak/<SLUG> origin/main
 cd ../<app>-<SLUG>
-cp -r $MAIN_DIR/config/certs ./config/ && cp $MAIN_DIR/.env ./.env
+cp -r "$MAIN_DIR/config/certs" ./config/ && cp "$MAIN_DIR/.env" ./.env
 sed -i '' '/^DATABASE_SUFFIX=/d;/^PORT=/d' .env
 # printf's leading newline matters: .env may not end in one, and a glued-on line is ignored
 printf '\nDATABASE_SUFFIX=%s\n' "<SUFFIX>" >> .env
@@ -66,7 +66,7 @@ Learn the feature well enough that every interview question is about *this* code
 
 - Find the feature's files: routes → controller → policy → service/model → views/components → Stimulus. Find the pattern the change should copy, since a sibling almost always exists.
 - **Find its existing specs**: `spec/models|services|components|policies/…` for the touched files, and the feature's folder under `spec/system/` (`grep -rl` for the page or component name). These become the regression set in Step 6.
-- `git -C $WT log --oneline -10 -- <hot files>` shows recent changes and the PRs that built the feature. A PRD under `.claude/prds/` may explain the original intent.
+- `git -C "$WT" log --oneline -10 -- <hot files>` shows recent changes and the PRs that built the feature. A PRD under `.claude/prds/` may explain the original intent.
 - Check the CLAUDE.md rules the change will touch: tenant scoping, SoftDeletable, Pundit roles (`Role::ROLES` is the truth), timezone and MM/DD/YYYY dates, UI copy discipline, Honeybadger context, no hand-edited `db/schema.rb`.
 - If prod data matters (how many rows, which statuses exist), read it only through `bin/prod-read` / `bin/prod-sql`, and print ids and counts, not PHI.
 - If you need a broad sweep across many files, send it to an Explore agent searching `$WT` and keep only the conclusion.
@@ -140,7 +140,7 @@ Build exactly the plan. If you find mid-way that it was wrong in a way that chan
 **Specs and lint.** Run the regression set from Step 3 plus everything added or changed. Not `bin/ci`.
 
 ```bash
-cd $WT
+cd "$WT"
 bin/rails tailwindcss:build                        # before any system spec, or pages render unstyled
 bundle exec rspec <changed/added specs> <the feature's existing unit specs> <the feature's spec/system files>
 bin/standardrb <changed .rb files>                 # never bare `bundle exec standardrb`
@@ -161,7 +161,7 @@ Fix failures and re-run. If a failure also happens on `origin/main`, note it for
 Stage specific files (`git add <paths>`, not `-A`). One commit is usually right. End it with the attribution line from the session's system reminder.
 
 ```bash
-cd $WT && git push -u origin tweak/<SLUG>
+cd "$WT" && git push -u origin tweak/<SLUG>
 gh pr create --title "<what changed, plain words>" --body "$(cat <<'EOF'
 ## Why
 <one short paragraph: the problem as the user described it in the interview>
@@ -201,14 +201,14 @@ Follow `.claude/skills/resolve-issue/references/cold-review.md` with:
 Start the dev server for review, then open the worktree:
 
 ```bash
-cd $WT
+cd "$WT"
 WORKTREE_PORT="$(grep -E '^PORT=' .env | cut -d= -f2)"
 BASE_URL="https://localhost:${WORKTREE_PORT}"
 if ! curl -sk -o /dev/null "$BASE_URL"; then
   mkdir -p log && nohup bin/dev </dev/null >log/dev-server.log 2>&1 & disown
   for i in $(seq 1 30); do curl -sk -o /dev/null "$BASE_URL" && break; sleep 1; done
 fi
-open -n -a "Visual Studio Code" $WT
+open -n -a "Visual Studio Code" "$WT"
 ```
 
 Finish with five lines: the PR link (say "draft" if Step 9 stopped it), the review URL (the page the change is on, if there is one), what was verified (specs, regression set, lint, review), the cold review (comment link, tag counts, what each `verify` check found), and anything under "Also noticed" that isn't in the review comment. When the comment holds anything beyond `verify` lines, end with: "Next: `/settle-pr-review <PR>` to decide on the review." The worktree stays, and `/worktree-sweep` cleans it up later.

@@ -2,6 +2,11 @@
 -- section except "Slowest 5" (which shows them, so you can see what the stall did).
 -- Usage: bin/prod-sql -v action='appointments#index' -v days=14 -f .claude/skills/page-speed/queries/drilldown.sql
 -- Labels are normalized SQL / template paths only (capture_actual_sql is off), so no PHI.
+-- Local times use -v tz=<IANA zone> (default UTC), e.g. -v tz=America/Chicago.
+\if :{?tz}
+\else
+\set tz UTC
+\endif
 \pset footer off
 \echo '== Distribution, stall-free (Before: p50 / p95 over the window · sql_per_load over ops_loads) =='
 with stall_minutes as materialized (
@@ -30,7 +35,7 @@ select count(*) as hits,
 from reqs;
 
 \echo '== Operation rows are capped at 100k (under a day of history): the sections below cover only =='
-select to_char(min(occurred_at) at time zone 'UTC' at time zone 'America/Phoenix', 'MM/DD HH12:MI AM') || ' MST' as ops_since,
+select to_char(min(occurred_at) at time zone 'UTC' at time zone :'tz', 'MM/DD HH12:MI AM') as ops_since,
        round(extract(epoch from now() at time zone 'UTC' - min(occurred_at)) / 3600) as hours
 from rails_pulse_operations;
 
@@ -77,7 +82,7 @@ where o.operation_type <> 'controller'
 group by 1, 2, 3 order by 7 desc limit 20;
 
 \echo '== Slowest 5 loads, stalls INCLUDED; other_slow = other actions >2s within 60s (high = app-wide stall) =='
-select q.id, to_char(q.occurred_at at time zone 'UTC' at time zone 'America/Phoenix', 'MM/DD HH12:MI AM') || ' MST' as at_mst,
+select q.id, to_char(q.occurred_at at time zone 'UTC' at time zone :'tz', 'MM/DD HH12:MI AM') as at_local,
        round(q.duration) as ms, q.status, r.path,
        (select count(*) from rails_pulse_requests o
          where o.duration > 2000 and o.id <> q.id

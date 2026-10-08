@@ -97,7 +97,7 @@ Work through `debugging-checklist.md`. The app-specific usual suspects, in order
 
 1. stale or unseeded parallel DB (`Reference data not found`): re-run `parallel:prepare_with_seeds`;
 2. a `build(:user, :role)` with no roles (roles need `create`);
-3. a timezone or UTC-boundary flake between 17:00 and midnight MST: `travel_to` a fixed instant;
+3. a timezone or UTC-boundary flake in the hours when the local date and the UTC date differ: `travel_to` a fixed instant;
 4. a soft-deleted record hidden by the default scope;
 5. an async HIPAA audit write that needs `perform_enqueued_jobs`.
 

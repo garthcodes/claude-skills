@@ -1,4 +1,5 @@
 ---
+name: product-question-tldr
 description: Answer a product question via /product-question, then boil the answer down to an ELI18 TLDR — one plain-English takeaway an 18-year-old would get instantly
 argument-hint: [question about the product]
 ---

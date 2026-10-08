@@ -56,7 +56,11 @@ find_free() {
 }
 
 write_port() {
-  sed -i '' '/^PORT=/d' "$ENV_FILE"
+  # grep + mv instead of `sed -i`, whose flags differ between BSD (macOS) and GNU sed.
+  local tmp
+  tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
+  grep -v '^PORT=' "$ENV_FILE" > "$tmp" || true
+  mv "$tmp" "$ENV_FILE"
   [ -s "$ENV_FILE" ] && [ -n "$(tail -c1 "$ENV_FILE")" ] && echo >> "$ENV_FILE"
   echo "PORT=$1" >> "$ENV_FILE"
 }

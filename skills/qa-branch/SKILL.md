@@ -1,4 +1,5 @@
 ---
+name: qa-branch
 description: QA the current branch by hand, in your own Chrome — reads the PR, seeds the data the feature needs, signs in as the right role, opens a tab in your browser at the feature, then walks you through one scenario at a time while you watch and react
 argument-hint: '[optional: extra focus, e.g. "just the calendar icon" or "as coordinator"] [--no-seed]'
 ---

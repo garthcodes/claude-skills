@@ -1,4 +1,5 @@
 ---
+name: plan
 description: Create agent-executable implementation plan based on codebase exploration
 argument-hint: [problem-description-or-prd-path-or-acceptance-criteria-path]
 ---

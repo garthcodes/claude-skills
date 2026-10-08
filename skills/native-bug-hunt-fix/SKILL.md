@@ -1,4 +1,5 @@
 ---
+name: native-bug-hunt-fix
 description: Fix a bug found by /native-bug-hunt in the Ruby Native app and verify the fix on the Android emulator (and on the iPhone, with the user tapping) using the nd helper and dev-only debug beacon. Use whenever the user hands over a docs/bug-reports/native-*/BUG-*.md file, or asks to fix a native-app, Ruby Native, emulator or iPhone-app bug.
 argument-hint: <path-to-native-bug-file.md>
 ---

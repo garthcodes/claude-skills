@@ -1,4 +1,5 @@
 ---
+name: product-question
 description: Answer product questions with short, plain-language explanations of what the product actually does, based only on reading the code — never docs
 argument-hint: [question about the product]
 ---

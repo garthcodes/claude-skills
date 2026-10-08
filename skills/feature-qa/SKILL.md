@@ -1,4 +1,5 @@
 ---
+name: feature-qa
 description: Comprehensive QA of a feature on the staging server — bugs, UX concerns, and questionable design decisions reported with 15-yr QA-engineer rigor
 argument-hint: <feature-description> [--quick | --standard | --exhaustive] [--regression <baseline.json>]
 ---
@@ -149,7 +150,7 @@ Every cell in this matrix becomes a scenario to execute. Missing cells in the fi
 If the feature needs data not covered by seeds, write a Rails runner snippet. Execute via your host's remote console (this example uses Fly.io's `flyctl ssh console` — substitute your own):
 
 ```bash
-flyctl ssh console -a your-app-staging -C 'bin/rails runner "..."'
+flyctl ssh console -a <app-name>-staging -C 'bin/rails runner "..."'
 ```
 
 **Important — Multi-tenant guardrail:** Always wrap data creation in the default tenant:
@@ -166,7 +167,7 @@ end
 **Client portal token lookup example:**
 
 ```ruby
-flyctl ssh console -a your-app-staging -C 'bin/rails runner "
+flyctl ssh console -a <app-name>-staging -C 'bin/rails runner "
   org = Organization.find_by(subdomain: %q(your-org))
   ActsAsTenant.with_tenant(org) do
     client = Client.order(:created_at).first
@@ -289,7 +290,7 @@ Not a load test — just sanity checks while you're there:
 
 - Page load > 3s on a page with normal data → file as a Performance observation
 - A dropdown of 500+ items that blocks the main thread → observation
-- An N+1 obviously visible in server logs — run `flyctl logs -a your-app-staging` (or your host's equivalent) briefly while using the feature — file as observation
+- An N+1 obviously visible in server logs — run `flyctl logs -a <app-name>-staging` (or your host's equivalent) briefly while using the feature — file as observation
 
 ### 3.11 Cross-feature touchpoints
 
@@ -310,12 +311,12 @@ This app is Rails 8 + Hotwire (Turbo + Stimulus) + Solid Queue. Watch for the pi
 - **CSRF failures** — A 422 on a form submit that otherwise looks fine is almost always a CSRF issue (missing/stale token). Check network response body.
 - **Stimulus controller connect errors** — Console errors like `Failed to load controller "foo"` or actions that silently do nothing often mean a controller never connected. Check the element for `data-controller="…"` and the action for `data-action="…"`.
 - **Flash messages** — After a successful write, the user should see a flash. If the redirect happens silently, file an OBS.
-- **Solid Queue async jobs** — If the feature dispatches a background job (reminders, PDFs, invoice charges, AI transcription), the UI success means "job queued," not "job done." Verify the downstream effect by waiting a reasonable time and refreshing. Run `flyctl logs -a your-app-staging --no-tail | tail -200` (or your host's equivalent) to see if the job actually ran and succeeded.
+- **Solid Queue async jobs** — If the feature dispatches a background job (reminders, PDFs, invoice charges, AI transcription), the UI success means "job queued," not "job done." Verify the downstream effect by waiting a reasonable time and refreshing. Run `flyctl logs -a <app-name>-staging --no-tail | tail -200` (or your host's equivalent) to see if the job actually ran and succeeded.
 - **Honeybadger** — Any error you trigger should appear in Honeybadger. If a 500 happens and Honeybadger is silent, that's itself a bug (missing notify call).
 - **ActsAsTenant** — Multi-tenancy is structural. You won't see cross-tenant leaks. Focus on within-org role/data scoping instead.
 - **Timezone handling** — Stored values should be IANA identifiers (`America/Phoenix`), displayed as raw IANA. Any friendly name (`Arizona`, `Pacific Time`) anywhere in the UI is a bug.
 - **Date display** — All dates must be `MM/DD/YYYY`. Anything else is a bug.
-- **N+1 sniff** — While using the feature, tail `flyctl logs -a your-app-staging | grep -E 'Client Load|User Load|Appointment Load'` — if the same query repeats N times for a single page load, file a Performance observation.
+- **N+1 sniff** — While using the feature, tail `flyctl logs -a <app-name>-staging | grep -E 'Client Load|User Load|Appointment Load'` — if the same query repeats N times for a single page load, file a Performance observation.
 
 ---
 
@@ -702,14 +703,14 @@ When invoked in regression mode, at the end of the run:
 
 1. **DO NOT FIX ANYTHING** — Your output is the session directory only.
 2. **DO NOT INVENT USERS** — Only sign in as the emails documented in Phase 1. If you need a role that isn't seeded, create the user via `flyctl ssh console` runner in the setup section and document it.
-3. **STAGING-ONLY** — Never run setup scripts against production. The Rails runner helper commands in this doc target the staging app (`-a your-app-staging`) explicitly. Never change that. The `claude-hook-prod-guard.py` hook intercepts any production-targeting command for user approval; staging-targeted commands pass untouched.
+3. **STAGING-ONLY** — Never run setup scripts against production. The Rails runner helper commands in this doc target the staging app (`-a <app-name>-staging`) explicitly. Never change that. The `claude-hook-prod-guard.py` hook intercepts any production-targeting command for user approval; staging-targeted commands pass untouched.
 4. **CONFIRM TENANT** — Any data-creation script must be wrapped in `ActsAsTenant.with_tenant(Organization.find_by(subdomain: "your-org"))`.
 5. **NAVIGATE LIKE A REAL USER** — Click links/buttons. Typing URLs is allowed only for the initial load and for the `flash[:staging_magic_link]` link (which is the "Sign in now" button you click anyway).
 6. **SIGN OUT BETWEEN ROLES** — Always sign out before switching users to avoid session leak.
 7. **FILE REPORTS AS YOU GO** — Screenshots are ephemeral. Don't batch.
 8. **BE A QA ENGINEER, NOT A SCRIPT RUNNER** — Question assumptions. If something works but looks wrong, file an observation.
 9. **READ THE POLICY** — For every authorization-relevant scenario, open the corresponding `app/policies/*.rb` and compare the UI's role gating against it.
-10. **WATCH LOGS WHEN DEBUGGING** — `flyctl logs -a your-app-staging --no-tail | tail -200` (or your host's equivalent) for recent activity while you have a failing request.
+10. **WATCH LOGS WHEN DEBUGGING** — `flyctl logs -a <app-name>-staging --no-tail | tail -200` (or your host's equivalent) for recent activity while you have a failing request.
 11. **VERIFY BEFORE DOCUMENTING** — Retry every bug once before filing. A flaky click is not a bug; file it as an OBS about reliability.
 12. **SHOW SCREENSHOTS INLINE** — After every screenshot, `Read` the PNG so the user actually sees it in the conversation.
 13. **CLEAN UP** — `mcp__playwright__browser_close` at the end. Remove any test records you created (document cleanup in `TEST_PLAN.md`).

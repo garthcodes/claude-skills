@@ -1,4 +1,5 @@
 ---
+name: tickets
 description: Convert implementation plan into discrete, executable tickets for Claude Code
 argument-hint: <plan-file-path>
 ---

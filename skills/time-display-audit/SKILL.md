@@ -1,18 +1,19 @@
 ---
+name: time-display-audit
 description: Audit every place the app renders a date or time (views, components, helpers, mailers, SMS, portal messages, PDFs, CSV, JS, JSON) against the per-surface timezone and format rules, write a severity-ranked audit to .claude/audits/, then fix every finding in the same run and drive bin/ci to green. Does not commit.
 argument-hint: [optional path scope, e.g. app/views/client_portal or app/components/foo_component.html.erb]
 ---
 
 # Time Display Audit
 
-You are a senior Rails engineer who has shipped scheduling software across US time zones and has been burned by every classic bug: the appointment reminder that says 2:00 PM when the session is at 1:00 PM because the mailer never left UTC, the invoice dated "tomorrow" because `created_at.strftime` ran on a UTC column after 5pm Phoenix, the Stimulus controller that formats a time in whatever zone the browser happens to be in, the CSV export that a biller reconciled against the wrong day. You know that in a therapy practice a wrong wall-clock time is not cosmetic — a client shows up an hour late, a no-show fee gets charged, a therapist double-books.
+You are a senior Rails engineer who has shipped scheduling software across US time zones and has been burned by every classic bug: the appointment reminder that says 2:00 PM when the session is at 1:00 PM because the mailer never left UTC, the invoice dated "tomorrow" because `created_at.strftime` ran on a UTC column after 6pm Chicago, the Stimulus controller that formats a time in whatever zone the browser happens to be in, the CSV export that a biller reconciled against the wrong day. You know that in a therapy practice a wrong wall-clock time is not cosmetic — a client shows up an hour late, a no-show fee gets charged, a therapist double-books.
 
 **Your mindset:**
 - **Every timestamp in the database is a UTC instant** — no exceptions, no "office-local" columns, no formatted strings. A stored timestamp has no display zone until someone chooses one. Every render site must choose one **explicitly and correctly**; "it looked right on my machine" is a bug waiting for DST or a remote therapist.
 - The zone is decided by **who is reading** and **what the time is tied to**, never by the server, the browser, or the developer's laptop.
 - A `Date` column (`date_of_birth`, `service_date`) is a calendar day and needs no zone. A `datetime` column rendered as a date **does** need a zone — the day boundary moves.
 - Consistency across surfaces is a correctness property: the same appointment must show the same wall-clock time on the therapist's calendar, in the client's portal, in the reminder SMS, and on the superbill.
-- **Staff see the practice's clock.** Every staff surface renders in the **office's** zone — the appointment's office when the row is tied to one, otherwise the org's default office — so the calendar, the session's invoice, its note's `signed_at`, its reminder log, and the audit trail all read in the same clock, and two staff members looking at the same screen from different cities see the same numbers. A remote therapist reads the office clock (labelled `MST`), not their own.
+- **Staff see the practice's clock.** Every staff surface renders in the **office's** zone — the appointment's office when the row is tied to one, otherwise the org's default office — so the calendar, the session's invoice, its note's `signed_at`, its reminder log, and the audit trail all read in the same clock, and two staff members looking at the same screen from different cities see the same numbers. A remote therapist reads the office clock (labelled `CST`), not their own.
 - You fix root causes by routing sites through the shared helpers, not by sprinkling `in_time_zone` calls.
 
 ## Input
@@ -35,7 +36,7 @@ Scope narrows the *inventory*, not the *rules* or the *verification*. A scoped r
 | **Staff** — every staff surface: scheduling (calendar, appointment lists/cards/detail, availability, waitlist, therapist video lobby) **and** everything else (billing, invoices, claims, ERAs, ledger, audit logs, messaging timestamps, tasks, documents, signatures, admin, reports, CSV exports, staff emails) | anything | **appointment's office** (`Appointment#timezone`, when an appointment is in hand) → **org default office** → viewing staff user's `time_zone` (recipient `User` for mailers/SMS/jobs) → `Appointment::DEFAULT_TIMEZONE` | `StaffTimeHelper#staff_strftime(time, format, appointment:)` — pass `appointment:` whenever the record is tied to one (the appointment itself, its invoice, its note, its reminder log) so the record reads in the same clock as the calendar |
 
 Rules of thumb for staff:
-- There is **one** staff chain and it is **office-first**. The calendar shows the office's clock; so does everything derived from that appointment, and so does every other staff record via the org default office. Never resolve a staff zone from the *assigned therapist* or from the *viewer* ahead of the office — a therapist in Los Angeles reading the Phoenix calendar sees `2:00 PM MST`, same as the front desk does.
+- There is **one** staff chain and it is **office-first**. The calendar shows the office's clock; so does everything derived from that appointment, and so does every other staff record via the org default office. Never resolve a staff zone from the *assigned therapist* or from the *viewer* ahead of the office — a therapist in Los Angeles reading the Chicago calendar sees `2:00 PM CST`, same as the front desk does.
 - The viewer's `time_zone` is a **fallback only**, reached when there is no appointment office and no org default office. It never overrides the office.
 - Pass `appointment:` for any record that belongs to an appointment, not just for the appointment row itself — that is what keeps an invoice's `created_at` in the same clock as the session it bills. Records with no appointment (tasks, audit logs, messaging, admin) omit it and land on the org default office.
 - The **scheduling vs. everything-else** distinction still exists, but only for **severity** (Phase 2): a wrong appointment time is P1, a wrong `created_at` on an invoice is P2. It never changes the zone chain.
@@ -50,18 +51,18 @@ date:               %m/%d/%Y                      # CLAUDE.md mandate
 long_date:          %B %d, %Y
 short_date:         %b %d, %Y
 weekday_long_date:  %A, %B %d, %Y
-time:               %-l:%M %p %Z                  # "2:30 PM MST"
+time:               %-l:%M %p %Z                  # "2:30 PM CST"
 long_datetime:      %B %d, %Y at %-l:%M %p %Z
 short_datetime:     %b %d at %-l:%M %p %Z
 ```
 
 - Every **clock time** carries the zone abbreviation (`%Z`). No exceptions on either audience — a staff member reading a remote therapist's calendar needs it as much as a travelling client.
 - Every **date** is `MM/DD/YYYY` unless a long form is deliberately chosen from the table. `%Y-%m-%d`, `%d/%m/%Y`, `%b %e` etc. are findings.
-- If a site genuinely needs a format not in the table (e.g. a time range "2:00–2:50 PM MST"), **add a key to both helpers' `FORMATS`** rather than inlining a string. Keep the two tables identical.
+- If a site genuinely needs a format not in the table (e.g. a time range "2:00–2:50 PM CST"), **add a key to both helpers' `FORMATS`** rather than inlining a string. Keep the two tables identical.
 
 ### Rule 3 — Date-only rendering of a datetime column still needs a zone
 
-`invoice.created_at.strftime("%m/%d/%Y")`, `appointment.start_time.to_date`, `Date.today`, `Time.now`, `.beginning_of_day` / `.end_of_day` / `.all_day` on a bare UTC value, `.to_date` before comparison with `Date.current` — all of these shift the calendar day for anything after ~5pm Phoenix. They are findings even though no clock time is shown. Route through `client_strftime(..., :date)` / `staff_strftime(..., :date)` or `in_client_zone` / `in_staff_zone` before `.to_date`.
+`invoice.created_at.strftime("%m/%d/%Y")`, `appointment.start_time.to_date`, `Date.today`, `Time.now`, `.beginning_of_day` / `.end_of_day` / `.all_day` on a bare UTC value, `.to_date` before comparison with `Date.current` — all of these shift the calendar day for anything after ~6pm Chicago. They are findings even though no clock time is shown. Route through `client_strftime(..., :date)` / `staff_strftime(..., :date)` or `in_client_zone` / `in_staff_zone` before `.to_date`.
 
 True `Date` columns (`date_of_birth`, `service_date`, `dos`, `effective_date`, `due_date` when it is a `date` type in `db/schema.rb`) are exempt — check the column type in `db/schema.rb` before deciding.
 
@@ -185,7 +186,7 @@ For each site decide the **required** zone and format from the Rules, compare wi
 |---|---|
 | `OK` | Correct helper, correct audience, named format. |
 | `RAW_UTC` | No zone conversion at all (`strftime` / `to_s` / `to_date` on the stored value). |
-| `WRONG_ZONE` | Converts, but to the wrong chain for the audience (e.g. portal page using `office_local_datetime`; staff calendar using the *assigned therapist's* or the *viewer's* zone instead of the office's; an invoice for an appointment rendered without `appointment:` so it lands on the org office while the calendar shows a different office; hard-coded `"America/Phoenix"`). |
+| `WRONG_ZONE` | Converts, but to the wrong chain for the audience (e.g. portal page using `office_local_datetime`; staff calendar using the *assigned therapist's* or the *viewer's* zone instead of the office's; an invoice for an appointment rendered without `appointment:` so it lands on the org office while the calendar shows a different office; hard-coded `"America/Chicago"`). |
 | `INLINE_ZONE` | Correct zone but resolved by hand at the call site (`in_time_zone(client.timezone)`) instead of via the helper — will drift. |
 | `WRONG_FORMAT` | Date not `MM/DD/YYYY` or a raw strftime string where a named format exists. |
 | `NO_ABBREV` | Clock time without `%Z`. |
@@ -250,7 +251,7 @@ Work the audit top-down, P0 first, one finding at a time. For each:
 2. Replace with the helper call named in the audit's **Fix:** line. Prefer `client_strftime` / `staff_strftime` with a named format. For a date-only render of a datetime column, use the `:date` key. For `.to_date` comparisons, convert with `in_client_zone` / `in_staff_zone` first. For a `NAIVE_STORE` site, replace the naive parse/constructor with a zone-aware one using the zone the surrounding code already resolves — the resulting `TimeWithZone` stores as UTC on its own; never add a manual `.utc` or offset arithmetic.
 3. For components, the helper is already included via `ApplicationComponent`; for services/jobs call `ClientTimeHelper.client_strftime(...)` / `StaffTimeHelper.staff_strftime(..., appointment:, viewer: recipient_user)` module-style (there is no `Current.user` outside a request — pass `viewer:` for staff emails/SMS/jobs so the fallback still resolves); for JS add the `data-…-time-zone-value` attribute at the mount point (resolved with the helper) and pass it to `Intl.DateTimeFormat`.
 4. Do not "fix" a `SKIP` site. Do not change which zone a form parses in (Rule 6, out of scope).
-5. Find the specs that cover the file (`grep -rl "<basename or class>" spec/`) and update expectations that encoded the old behavior. If a client-facing site had **no** spec asserting the rendered zone, add one example that freezes time at an instant that crosses the day boundary (e.g. `2026-03-15 02:30:00 UTC` → `03/14/2026 7:30 PM MST` for Phoenix) so the regression is caught.
+5. Find the specs that cover the file (`grep -rl "<basename or class>" spec/`) and update expectations that encoded the old behavior. If a client-facing site had **no** spec asserting the rendered zone, add one example that freezes time at an instant that crosses the day boundary (e.g. `2026-01-15 02:30:00 UTC` → `01/14/2026 8:30 PM CST` for Chicago) so the regression is caught.
 6. Mark the finding `✅ fixed` in the audit table immediately, so the doc always reflects state.
 
 Batch mechanical P3 fixes (same pattern, many files) after the P0–P2 pass, but still one file at a time with a read before each edit.

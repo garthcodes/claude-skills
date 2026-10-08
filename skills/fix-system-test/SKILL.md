@@ -1,4 +1,5 @@
 ---
+name: fix-system-test
 description: Fix System Test Command — debug failing/flaky system tests with Playwright and fix the test and/or application code
 argument-hint: <spec-file-or-directory> [additional-failing-specs...]
 ---

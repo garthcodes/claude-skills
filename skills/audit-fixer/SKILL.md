@@ -1,4 +1,5 @@
 ---
+name: audit-fixer
 description: Walk a severity-ranked audit document and fix every finding one at a time by invoking /plan then /code per finding, until all are taken care of. Does not commit.
 argument-hint: <path-to-audit-doc> [optional severity scope, e.g. "P0-P1 only"]
 ---

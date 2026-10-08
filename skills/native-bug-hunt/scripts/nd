@@ -80,8 +80,12 @@ def key(name)
   adb("shell", "input", "keyevent", code.to_s)
 end
 
+# `adb shell input text` runs through the device's shell, so escape every shell metacharacter
+# (globs included). It types "%s" as a space, so a literal "%s" can't be typed, and it can't type
+# newlines or tabs: send those as key events instead.
 def type_text(text)
-  escaped = text.gsub(/([\\'"`$&|;<>()*~?!#])/) { "\\#{$1}" }.gsub(" ", "%s")
+  abort "type_text: newlines/tabs aren't supported; use a key event" if text.match?(/[\n\t]/)
+  escaped = text.gsub(/([\\'"`$&|;<>()*~?!\#{}\[\]])/) { "\\#{$1}" }.gsub(" ", "%s")
   adb("shell", "input", "text", escaped)
 end
 
@@ -147,7 +151,8 @@ when "log"
   end
   puts "== requests"
   dev_log = File.join(ROOT, "log/development.log")
-  lines = `tail -n 20000 #{dev_log.inspect}`.scrub.lines
+  out, _status = Open3.capture2("tail", "-n", "20000", dev_log)
+  lines = out.scrub.lines
   puts lines.grep(/^(Started|Completed)/).grep_v(%r{/assets/|/cable|/__native_debug/}).last(count)
 when "url"
   url = args.fetch(0)

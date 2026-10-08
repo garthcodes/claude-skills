@@ -1,4 +1,5 @@
 ---
+name: native-bug-hunt
 description: Hunt for bugs in the Ruby Native app — Claude drives the Android emulator (taps, typing, screenshots) and reads inside the WebView through the dev-only debug beacon; iOS runs with the user tapping
 argument-hint: "[--ios] <feature-description>"
 ---

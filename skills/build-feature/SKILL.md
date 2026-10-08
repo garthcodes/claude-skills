@@ -1,4 +1,5 @@
 ---
+name: build-feature
 description: End-to-end feature build from PRD to PR — plan, review, implement, QA, and ship in a worktree
 argument-hint: <path-to-prd.md>
 ---

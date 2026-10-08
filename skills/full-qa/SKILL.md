@@ -1,4 +1,5 @@
 ---
+name: full-qa
 description: Senior-QA-engineer orchestrator. Audits the entire application across every relevant role and feature using Playwright, producing a resumable bug index. Composes /create-qa-document (extended) and /execute-qa. Pure QA — does not fix.
 argument-hint: [<path-to-existing-full-app-qa-dir-to-resume>]
 ---

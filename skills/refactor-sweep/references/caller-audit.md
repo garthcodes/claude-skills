@@ -9,7 +9,7 @@ Search `$WT`, never the main checkout. Record what you searched, so the cold rev
 Run each for the moved class name, every moved method name, and (for callbacks) the model:
 
 ```bash
-cd $WT
+cd "$WT"
 grep -rn "ClassName\|class_name_snake\|:method_name\|\"method_name\"\|'method_name'" \
   app lib config db/seeds* script spec/support .claude/skills docs --include='*' | grep -v '^spec/refactor_locks'
 ```
@@ -19,7 +19,7 @@ Then the indirect reach, one by one:
 - **Metaprogramming**: `send(`, `public_send(`, `try(`, `constantize`, `safe_constantize`, `delegate … to:`, `method(:name)`, callbacks named by symbol, `policy_class`, `"#{…}Service"` string building.
 - **Jobs and schedules**: `config/recurring.yml`, `config/queue.yml`, `set(wait…).perform_later` sites, `ApplicationJob` hooks (`on_discard`, `honeybadger_context`).
 - **Admin**: `app/avo/` resources, actions, filters and cards (they save records and call services outside controllers).
-- **Rake and runbooks**: `lib/tasks/**/*.rake`, `script/`, `tmp/` files committed to git, `docs/*.md` runbooks, and `.claude/skills/*/` (several skills pipe Ruby into `bin/prod-read` or hand the user `bin/rails runner` scripts that call services by name: `/import-therapist`, `/auto-import-therapist`, `/sp-claim-status`, `/stedi-billing-expert`, …).
+- **Rake and runbooks**: `lib/tasks/**/*.rake`, `script/`, `tmp/` files committed to git, `docs/*.md` runbooks, and `.claude/skills/*/` (several skills pipe Ruby into `bin/prod-read` or hand the user `bin/rails runner` scripts that call services by name: data-import runbooks, claim-status runbooks, `/stedi-billing-expert`, …).
 - **Seeds and imports**: `db/seeds/`, the legacy-system import services (they often set flags such as `imported` to suppress callbacks on purpose).
 - **Views and components** for model methods: `app/views`, `app/components`, helpers, mailer templates, `as_json`/serializers.
 - **JavaScript** for routes: `app/javascript` (fetch URLs, `data-*-url-value`), and email/SMS templates that embed URLs (`*_url` helpers).

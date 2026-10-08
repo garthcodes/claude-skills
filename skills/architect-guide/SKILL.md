@@ -1,4 +1,5 @@
 ---
+name: architect-guide
 description: Brainstorm solutions with an experienced Rails architect and product thinker
 argument-hint: [problem or feature to solve]
 ---

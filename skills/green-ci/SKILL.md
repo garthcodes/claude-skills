@@ -1,4 +1,5 @@
 ---
+name: green-ci
 description: Run bin/ci and drive it to green — diagnose every failure, route it to the right fixer (/rspec-test-expert, /fix-system-test, /debug), stabilize flaky tests, never commit.
 argument-hint: [optional: specific stage or spec path to focus on]
 ---

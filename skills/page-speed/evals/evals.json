@@ -11,7 +11,7 @@
         "Runs shared_ops.sql and either targets or mentions the top shared cost",
         "Diagnosis names concrete causes with file:line references from the drilldown",
         "Plan labels SQL numbers with the operations window (ops_since), separate from the 14-day load times",
-        "Plan uses tables, ~20-30 lines, plain-language causes, MST times",
+        "Plan uses tables, ~20-30 lines, plain-language causes, times in the practice's local zone",
         "Ends by waiting for 'implement' or adjustments; no per-change approval questions and no AskUserQuestion",
         "Plan has a Risk check line naming, per change, the patterns.md break-table row and why it's safe, plus the one-line 'After implement' chain",
         "No repo files modified"
@@ -34,12 +34,12 @@
     {
       "id": 3,
       "prompt": "run the page speed pass again, the log is at evals/files/log_four_shipped.md (treat it as docs/PAGE_PERFORMANCE_LOG.md)",
-      "expected_output": "Settles shipped rows: #380 (appointments#index, deployed 09/22) is past 3 days and gets After numbers with sql_per_load; newer PRs stay shipped. Skips the four resting pages, notices any open page-speed worktree/perf PR, picks the next eligible target and stops at the plan.",
+      "expected_output": "Settles shipped rows: #212 (appointments#index, deployed 09/22) is past 3 days and gets After numbers with sql_per_load; newer PRs stay shipped. Skips the four resting pages, notices any open page-speed worktree/perf PR, picks the next eligible target and stops at the plan.",
       "files": [
         "evals/files/log_four_shipped.md"
       ],
       "assertions": [
-        "Checks deploys and fills After for #380 only if >= 3 days and >= 20 hits since deploy; no fabricated After numbers for the others",
+        "Checks deploys and fills After for #212 only if >= 3 days and >= 20 hits since deploy; no fabricated After numbers for the others",
         "Says the old Before rows have no query count and compares p50/p95 only for them",
         "Does not pick appointments#index, clients#show, staff/conversations#show or clients#index; cites rotation",
         "Checks git worktrees / open perf/ PRs and treats their pages as in progress",

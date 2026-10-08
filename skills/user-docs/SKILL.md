@@ -1,4 +1,5 @@
 ---
+name: user-docs
 description: Generate a user-facing handbook document that doubles as knowledge corpus for the dashboard help assistant
 argument-hint: <feature-name-or-index-row>
 ---

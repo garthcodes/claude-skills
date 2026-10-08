@@ -1,4 +1,5 @@
 ---
+name: execute-qa
 description: Execute a QA plan document and report bugs using Playwright browser automation
 argument-hint: <path-to-qa-plan.md>
 ---

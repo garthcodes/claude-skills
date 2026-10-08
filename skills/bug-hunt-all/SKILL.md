@@ -1,4 +1,5 @@
 ---
+name: bug-hunt-all
 description: Hunt for bugs across every top-level feature section in docs/APP_FEATURES.md using Playwright. Sequential, resumable, one master index at the end. Does not fix bugs.
 argument-hint: [<path-to-existing-full-app-sweep-dir-to-resume>]
 ---

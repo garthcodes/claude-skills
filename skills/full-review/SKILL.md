@@ -1,4 +1,5 @@
 ---
+name: full-review
 description: Orchestrate /review → /scale-review → /review-fixes → /code end-to-end against a PR or the current branch
 argument-hint: [pr-number]
 ---

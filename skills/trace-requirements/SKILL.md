@@ -1,4 +1,5 @@
 ---
+name: trace-requirements
 description: Verify every PRD functional requirement is implemented in the branch diff — map each FR (and each row of the acceptance-criteria contract, guards included) to code/spec evidence or flag it MISSING/PARTIAL
 argument-hint: [prd-or-contract-path-or-blank]
 ---

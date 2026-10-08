@@ -10,7 +10,7 @@ context is available to you — the repo, `.claude/pipeline-state.md`, and these
 |---|---|
 | `PHASE` | Your agent ID: `A1 A2 B1 B2 B3 C1 C2 C3 C4` |
 | `FEATURE_NAME` | kebab-case slug; branch is `feature/${FEATURE_NAME}` |
-| `MAIN_DIR` | The launching checkout (the main repo checkout, or a `/prd-worktree` sibling like `../<repo-name>-<name>`). Source of the PRD and these phase files. Never run project commands there. |
+| `MAIN_DIR` | The launching checkout (the main repo checkout, or a `/prd-worktree` sibling like `../<repo>-<name>`). Source of the PRD and these phase files. Never run project commands there. |
 | `PRIMARY_DIR` | The primary checkout (the main repo, even when launched from a `/prd-worktree`). Source of `.env` and certs; pipeline worktrees live under its `.claude/worktrees/`; pre-existing flakes are confirmed here. |
 | `WORKTREE_PATH` | The pipeline worktree. A1 creates it (`pwd`); everyone else `cd`s into it first. |
 | `PRD` | `.claude/prds/${FEATURE_NAME}.md` (relative to both checkouts) |

@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """Look up payers in Stedi's payer directory and resolve carrier families.
 
-Read-only, free, and works with the TEST key (the directory is shared between
-test and production). Never needs a production Fly command.
+Read-only and free. Uses the TEST key only (STEDI_TEST_API_KEY): the payer
+directory is shared between test and production, so a production key is never
+needed and is never read.
 
 Usage (run from the repo root so .env is found):
 
   # Where does a name on an insurance card / legacy export route?
-  scripts/stedi_payer_family.py --like "Surest"
-  scripts/stedi_payer_family.py --like 25463
+  python3 .claude/skills/stedi-billing-expert/scripts/stedi_payer_family.py --like "Surest"
+  python3 .claude/skills/stedi-billing-expert/scripts/stedi_payer_family.py --like 25463
 
   # Every payer Stedi files under a corporate family (by group id or name)
-  scripts/stedi_payer_family.py --group-id FIVMG
-  scripts/stedi_payer_family.py --group-name "UnitedHealth Group" --states TX,OK --medical
+  python3 .claude/skills/stedi-billing-expert/scripts/stedi_payer_family.py --group-id FIVMG
+  python3 .claude/skills/stedi-billing-expert/scripts/stedi_payer_family.py --group-name "UnitedHealth Group" --states TX,OK --medical
 
   # Machine-readable
-  scripts/stedi_payer_family.py --group-id FIVMG --json > /tmp/uhg.json
+  python3 .claude/skills/stedi-billing-expert/scripts/stedi_payer_family.py --group-id FIVMG --json > uhg.json
 
 Group lookups page the whole directory (~3,700 payers, ~37 requests) because
 the API has no server-side group filter; the result is cached for a day in
---cache (default: /tmp/stedi_payers_cache.json). --refresh forces a re-fetch.
+--cache (default: ~/.cache/stedi-payer-family/payers.json). --refresh forces a re-fetch.
 
 See ../references/payer-directory.md for how each field maps onto the app's
 `payers` / `payer_groups` tables and the rules for turning a family into rows.
@@ -38,17 +39,16 @@ DEFAULT_STATES = os.environ.get("STEDI_OPERATING_STATES", "")
 
 
 def api_key():
-    for var in ("STEDI_API_KEY", "STEDI_TEST_API_KEY"):
-        if os.environ.get(var):
-            return os.environ[var]
-    # Fall back to the checkout's .env (test key is the one normally active).
+    if os.environ.get("STEDI_TEST_API_KEY"):
+        return os.environ["STEDI_TEST_API_KEY"]
+    # Fall back to the checkout's .env. Only the test key is ever read.
     if os.path.exists(".env"):
-        for line in open(".env"):
-            line = line.strip()
-            for var in ("STEDI_TEST_API_KEY", "STEDI_API_KEY"):
-                if line.startswith(var + "="):
+        with open(".env") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("STEDI_TEST_API_KEY="):
                     return line.split("=", 1)[1].strip().strip('"').strip("'")
-    sys.exit("No STEDI_API_KEY / STEDI_TEST_API_KEY in env or .env")
+    sys.exit("No STEDI_TEST_API_KEY in env or .env (the production key is never used)")
 
 
 def get(path, key):
@@ -84,7 +84,9 @@ def full_directory(key, cache, refresh):
         token = d.get("nextPageToken")
         if not token:
             break
-    json.dump(payers, open(cache, "w"))
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    with open(cache, "w") as f:
+        json.dump(payers, f)
     return payers
 
 
@@ -139,7 +141,10 @@ def main():
     ap.add_argument("--states", default=DEFAULT_STATES, help="keep payers operating in these states or NATIONAL/blank (default $STEDI_OPERATING_STATES); '' = no filter")
     ap.add_argument("--medical", action="store_true", help="keep only payers whose coverageTypes include medical")
     ap.add_argument("--claims-supported", action="store_true", help="keep only professionalClaimSubmission == SUPPORTED")
-    ap.add_argument("--cache", default="/tmp/stedi_payers_cache.json")
+    ap.add_argument(
+        "--cache",
+        default=os.path.join(os.path.expanduser("~"), ".cache", "stedi-payer-family", "payers.json"),
+    )
     ap.add_argument("--refresh", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()

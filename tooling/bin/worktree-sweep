@@ -2,7 +2,7 @@
 # Remove the worktrees that hold nothing worth keeping; keep the current or relevant ones.
 #
 # Usage: bin/worktree-sweep            # remove stale worktrees, keep relevant ones
-#        bin/worktree-sweep --all      # remove EVERY worktree, no checks (old behavior)
+#        bin/worktree-sweep --all      # remove EVERY worktree, no checks
 #        bin/worktree-sweep --dry-run  # print the keep/remove decision for each, change nothing
 #        (--all and --dry-run combine)
 #
@@ -14,10 +14,14 @@
 #   3. its branch has an open PR
 #   4. a Claude Code session is running inside it
 #   5. its branch has no PR and a file in it (or its last commit) changed in the last 24 hours
+# A leftover directory git no longer knows about is kept when a file in it changed in the last 24 hours.
 # Everything else is removed: the dev server running from it is stopped (matched by the
-# listening process's working directory, so the main checkout's server is never touched), the <app>_development/<app>_test databases matching its DATABASE_SUFFIX are dropped
-# (including parallel_rspec numbered ones), and `git worktree remove --force` runs.
-# Branches are never deleted, so committed work survives.
+# listening process's working directory, so the main checkout's server is never touched), its
+# databases are dropped by exact name (<app>_development<suffix>, <app>_test<suffix> and the
+# parallel_rspec copies <app>_test<suffix>2..N, never a name another worktree's suffix also produces),
+# and `git worktree remove --force` runs (a locked worktree is reported, not forced).
+# Branches are never deleted, so committed work survives. --dry-run changes nothing, not even git's
+# worktree list or remote-tracking refs.
 #
 # Exit status: 0, or 1 if any "error —" line was printed.
 set -uo pipefail
@@ -45,7 +49,7 @@ MAIN_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 WT_ROOT="$MAIN_DIR/.claude/worktrees"
 HAD_ERROR=0
 
-git -C "$MAIN_DIR" worktree prune
+[ $DRY_RUN -eq 1 ] || git -C "$MAIN_DIR" worktree prune
 
 # Registered worktrees other than the main checkout, then unregistered .claude/worktrees/* dirs.
 targets=()
@@ -72,13 +76,20 @@ PR_STATES=""
 if [ $ALL -eq 0 ]; then
   PR_STATES="$(cd "$MAIN_DIR" && gh pr list --state all --limit 500 --json headRefName,state,updatedAt \
     --jq 'group_by(.headRefName)[] | sort_by(.updatedAt) | last | "\(.headRefName)\t\(.state)"' 2>/dev/null || true)"
-  git -C "$MAIN_DIR" fetch --quiet --prune origin 2>/dev/null || true
+  [ $DRY_RUN -eq 1 ] || git -C "$MAIN_DIR" fetch --quiet --prune origin 2>/dev/null || true
 fi
 
 # Working directories of running Claude Code CLI processes.
 CLAUDE_CWDS="$(for pid in $(ps -axo pid=,comm= | awk '$2 ~ /(^|\/)claude$/ {print $1}'); do
   lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'
 done)"
+
+# Prints something when a file under $d (outside generated dirs) changed in the last 24 hours.
+recent_file() {
+  find "$d" \( -name .git -o -name node_modules -o -path "$d/tmp" -o -path "$d/log" -o -path "$d/vendor" \
+    -o -path "$d/coverage" -o -path "$d/storage" -o -path "$d/public/assets" -o -path "$d/app/assets/builds" \) -prune \
+    -o -type f -mmin -"$RECENT_MINUTES" -print -quit 2>/dev/null
+}
 
 # Prints the reason to keep worktree $d (empty → remove). Uses $d and $branch.
 keep_reason() {
@@ -95,9 +106,7 @@ keep_reason() {
     && { echo "Claude session running in it"; return; }
   if [ -z "$pr_state" ]; then
     if [ "$(git -C "$d" log -1 --format=%ct 2>/dev/null || echo 0)" -gt "$(( $(date +%s) - RECENT_MINUTES * 60 ))" ] ||
-      [ -n "$(find "$d" \( -name .git -o -name node_modules -o -path "$d/tmp" -o -path "$d/log" -o -path "$d/vendor" \
-        -o -path "$d/coverage" -o -path "$d/storage" -o -path "$d/public/assets" -o -path "$d/app/assets/builds" \) -prune \
-        -o -type f -mmin -"$RECENT_MINUTES" -print -quit 2>/dev/null)" ]; then
+      [ -n "$(recent_file)" ]; then
       echo "no PR, touched in the last 24h"; return
     fi
   fi
@@ -135,12 +144,36 @@ stop_server() {
   return 0
 }
 
+# parallel_rspec numbers its test databases "", 2, 3 … up to the processor count.
+PARALLEL_MAX="${PARALLEL_TEST_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)}"
+
+# Every database name a worktree with DATABASE_SUFFIX $1 can own, one per line.
+db_names_for() {
+  local n
+  echo "${APP_DB_PREFIX}_development$1"
+  echo "${APP_DB_PREFIX}_test$1"
+  for ((n = 2; n <= PARALLEL_MAX; n++)); do echo "${APP_DB_PREFIX}_test$1$n"; done
+}
+
+# Suffixes claimed by every worktree's .env, so one worktree's names never take another's databases
+# (suffix _issue_5's parallel copy "…_issue_52" is also issue 52's main test database).
+ALL_SUFFIXES="$(for t in "${targets[@]}"; do
+  grep -s '^DATABASE_SUFFIX=' "$t/.env" | tail -1 | cut -d= -f2 | tr -d '"'"'"' '
+done | sort -u)"
+
 # Prints the DBs that could not be dropped (empty on success). No suffix → nothing dropped,
 # so the shared <app>_development/<app>_test are never touched.
 drop_databases() {
   [ -n "$suffix" ] || return 0
-  local dbs db remaining=""
-  dbs="$(psql -Atc "SELECT datname FROM pg_database WHERE datname ~ '^${APP_DB_PREFIX}_(development|test)${suffix}[0-9]*$'" postgres 2>/dev/null || true)"
+  if ! [[ "$suffix" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "(DATABASE_SUFFIX '$suffix' has characters other than letters, digits and _)"; return 0
+  fi
+  local existing others db dbs remaining=""
+  existing="$(psql -Atc "SELECT datname FROM pg_database" postgres 2>/dev/null || true)"
+  others="$(while IFS= read -r s; do
+    [ -n "$s" ] && [ "$s" != "$suffix" ] && db_names_for "$s"
+  done <<< "$ALL_SUFFIXES")"
+  dbs="$(db_names_for "$suffix" | grep -xF -f <(printf '%s\n' "$existing") | grep -vxF -f <(printf '%s\n' "${others:-}") || true)"
   for db in $dbs; do
     if ! dropdb --if-exists "$db" >/dev/null 2>&1; then
       psql -Atc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db'" postgres >/dev/null 2>&1
@@ -160,8 +193,12 @@ for i in "${!targets[@]}"; do
   dbs_note="${suffix:+, dbs ${APP_DB_PREFIX}_*${suffix}}"
   branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 
-  if [ $ALL -eq 0 ] && [ $registered -eq 1 ]; then
-    reason="$(keep_reason)"
+  if [ $ALL -eq 0 ]; then
+    if [ $registered -eq 1 ]; then
+      reason="$(keep_reason)"
+    else
+      reason=""; [ -n "$(recent_file)" ] && reason="not a registered worktree, but touched in the last 24h"
+    fi
     if [ -n "$reason" ]; then
       echo "$name: kept — $reason"; continue
     fi
@@ -179,7 +216,7 @@ for i in "${!targets[@]}"; do
     HAD_ERROR=1; continue
   fi
   if [ $registered -eq 1 ]; then
-    if ! err="$(git -C "$MAIN_DIR" worktree remove --force --force "$d" 2>&1)"; then
+    if ! err="$(git -C "$MAIN_DIR" worktree remove --force "$d" 2>&1)"; then
       echo "$name: error — git worktree remove failed: $err"
       HAD_ERROR=1; continue
     fi
@@ -189,5 +226,5 @@ for i in "${!targets[@]}"; do
   echo "$name: removed${dbs_note}"
 done
 
-git -C "$MAIN_DIR" worktree prune
+[ $DRY_RUN -eq 1 ] || git -C "$MAIN_DIR" worktree prune
 exit $HAD_ERROR

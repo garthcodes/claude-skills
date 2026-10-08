@@ -1,4 +1,5 @@
 ---
+name: ideate
 description: Brainstorm innovative solutions Paul Graham-style before writing a PRD
 argument-hint: [raw problem, issue, or half-formed idea]
 ---

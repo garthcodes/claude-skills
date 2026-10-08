@@ -1,4 +1,5 @@
 ---
+name: full-qa-fix
 description: Orchestrator that fixes every bug found by /full-qa. Walks a full-app-qa session's MASTER_INDEX.md and, for each section that has bugs, spawns a serial sub-agent running /fix-bug-index on that section's INDEX.md. Verifies fixes with Playwright, then commits that section's changes. One commit per section.
 argument-hint: [<path-to-full-app-qa-dir-or-MASTER_INDEX.md>]
 ---

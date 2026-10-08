@@ -1,6 +1,6 @@
 # claude-skills
 
-A working library of 74 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications: planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that chain all of them into end-to-end workflows.
+A working library of 76 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications: planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that chain all of them into end-to-end workflows.
 
 This is my real, day-to-day setup, genericized for sharing (app names, hosts and infra identifiers are replaced with placeholders). It's here so you can see how I work and borrow whatever is useful.
 
@@ -8,6 +8,8 @@ This is my real, day-to-day setup, genericized for sharing (app names, hosts and
 - [How it fits together](#how-it-fits-together)
 - [My workflows](#my-workflows): [new feature](#1-a-new-feature), [small change](#2-a-small-change-to-something-that-already-exists), [production errors](#3-production-errors), [settling PRs](#4-settling-a-pr-before-merge), [performance](#5-performance-rotation), [code health](#6-code-health-sweeps), [QA](#7-qa-sweeps)
 - [The building blocks the orchestrators share](#the-building-blocks-the-orchestrators-share)
+- [Design principles: how these skills treat the model](#design-principles-how-these-skills-treat-the-model)
+- [Security](#security)
 - [Skill catalog](#skill-catalog)
 - [Conventions these skills assume](#conventions-these-skills-assume)
 
@@ -104,6 +106,9 @@ This is the workflow I use most. Three skills split the job by urgency:
  └── one /resolve-issue sub-agent per issue, up to 3 building at once, bin/ci serialized through one CI slot
 
 /resolve-issue <N>                    one issue → one reviewed, CI-green PR that says "Closes #N"
+
+/resolve-honeybadger                  after deploy: resolve faults whose fix is merged AND live,
+                                      reopen the issue (fix-didnt-work) if a fault fires after its fix
 ```
 
 **`/fix-honeybadger`** is built for speed: an urgent fault is costing users right now, so it skips the heavy review chain, aims for a plan in the terminal within about 3 minutes and a PR within about 15 minutes of "implement". Every regression spec must fail before the fix and pass after it. Every other fixable fault, and every follow-up it notices along the way, becomes a GitHub issue, so nothing is lost and nothing bloats the urgent PR. `/fix-honeybadger triage` only files issues; `/fix-honeybadger <fault-id>` skips the sweep.
@@ -112,7 +117,32 @@ This is the workflow I use most. Three skills split the job by urgency:
 
 **`/resolve-issues`** is the batch orchestrator. It never investigates or edits code itself (that would fill its context on the first issue): it hands each issue whole to a `/resolve-issue` sub-agent, runs up to three at once, lets everything overlap except `bin/ci` (one CI slot, `scripts/ci-slot`, because a full parallel rspec run saturates the machine), removes each worktree once its PR is open, keeps a resumable ledger, and passes "carry lines" from one issue's cold review to the issues after it. It ends with a table of PRs. `max:2` is a cheap first run; `dry-run` shows the queue.
 
-Both `/fix-honeybadger` and `/resolve-issue` also have an `auto` mode for unattended runs: plans are printed and not waited on, PRs are drafts labeled `autofix`, every early stop is written to the issue with a `needs-decision` label, fault and issue text is treated as data and never as instructions, and the final line is machine-readable for a poller. (The poller they mention, `bin/hb-autofix`, is a launchd job that starts these runs when a new fault appears; it isn't shipped here.)
+**`/resolve-honeybadger`** closes the loop. A fault is only marked resolved once the PR that fixed it is merged *and* that commit is an ancestor of the revision production is actually running. A fault that fires again after its fix went live reopens its issue with a `fix-didnt-work` label, instead of being quietly resolved.
+
+#### Unattended mode: the autofix pipeline
+
+`/fix-honeybadger`, `/group-issues` and `/resolve-issue` also run with nobody watching, as Claude Code **cloud routines**. A small dispatcher inside the application drives them (it isn't shipped here; it's ordinary app code):
+
+```
+Honeybadger webhook ─┐  (bearer token)       ┌─► /fix-honeybadger <fault> auto run=<id>   one fault → draft PR
+GitHub webhook ──────┼─► dispatcher queue ───┼─► /group-issues auto run=<id>            merge related auto-filed issues
+fallback poll ───────┘  (HMAC, dedupe)       └─► /resolve-issue <N> auto run=<id>       one issue → draft PR
+                         max 3 runs, noise /                       │
+                         loop filters                              ▼
+                                               AUTO_PHASE / AUTO_RESULT comments on GitHub → dispatcher records the outcome
+```
+
+What makes it safe to leave alone, described in [`resolve-issue/references/cloud-mode.md`](skills/resolve-issue/references/cloud-mode.md):
+
+- **Fault and issue text is data, never instructions.** If it reads like an instruction, the run stops and labels the issue `needs-decision`.
+- **Every credential is scoped down.** Runs reach Honeybadger only through a read-only wrapper. They reach GitHub only through a REST wrapper locked to one repository that can open **draft** PRs and nothing more. A pre-push hook rejects any branch that isn't the run's own. Production is denied outright.
+- **The proof is a reproduction, not a model's say-so.** The regression spec has to fail on the old code, pass with the fix, and fail again with the fix reverted. A fault that can't be reproduced is labeled `not-reproduced` and a person decides on it.
+- **Two reviews before a person sees it.** The run reviews its own branch at high effort, then a separate cold reviewer on a stronger model checks that each "fixed" finding really is fixed and that no hunk strays from the issue.
+- **Runs report where people can read it.** One phase comment is edited in place, there is exactly one result comment on every path, and a run silent for 4 hours is flagged as stuck. Nothing merges on its own: `/settle-pr-review` is still where a person decides.
+
+These controls limit what a manipulated run can do; they don't make manipulation impossible. Everything a run posts appears under the account that owns the routine, which is why the output is always a draft and a person always merges. See [SECURITY.md](SECURITY.md).
+
+**`/group-issues`** runs before anything builds. When several faults share one root cause (the same external service failing the same way, the same bug in different callers), it combines them into one issue so the pipeline ships one fix instead of five overlapping PRs. When it isn't sure, it leaves the issues separate.
 
 ### 4. Settling a PR before merge
 
@@ -176,7 +206,27 @@ The orchestrators above don't re-implement review, testing or CI. They call the 
 | Cold review | `skills/resolve-issue/references/cold-review.md`: the builder writes honest notes (assumptions, what wasn't verified, scope drift), then a read-only agent that never saw the build reviews the ask plus the diff. Its `verify` points get checked and fixed; the rest is posted as the `## Cold review` comment that `/settle-pr-review` reads | every PR-opening orchestrator |
 | `/worktree` / `/worktree-sweep` | Create an isolated worktree (own branch, databases, port) / remove old ones, keeping any with uncommitted or unpushed work, an open PR, a running Claude session, or recent changes and no PR (`--all` removes everything) | by hand |
 
-**Why this works:** each stage runs in a fresh sub-agent context, so a long pipeline never runs out of context. Every stage leaves an artifact on disk, so pipelines can resume and be audited. Review stages are separate skills from build stages, so the critic isn't grading its own work. And because the human's attention goes to the PR and a handful of real decisions, not to approving every step, several of these can run at once.
+## Design principles: how these skills treat the model
+
+The skills are written around what an LLM agent is actually good and bad at. Each principle below points at the place it's implemented.
+
+| Principle | Why | Where |
+|---|---|---|
+| **Context is a budget, not a scratchpad** | Quality drops as a context fills with tool output, and every tool call re-reads the whole thing. Long pipelines hand each phase to a fresh sub-agent, and orchestrators never do the work themselves | `build-feature/phases/` (nine agents, file hand-offs); `resolve-issues` (never reads code); `build-feature/scripts/token_report.py` measures peak context per phase |
+| **The generator never grades itself** | A model reviewing its own work in the same context agrees with itself. Review is a separate skill, and the final review is *cold*: it sees only the original ask and the diff | `resolve-issue/references/cold-review.md` |
+| **Deterministic gates over model judgment** | "Looks right" isn't evidence. Specs must fail before a fix and pass after (and fail again with the fix reverted). Test quality is measured by line coverage and mutation probes, and `bin/ci` is the final gate | `rspec-test-expert/test-quality.md`, `rspec-test-expert/scripts/probe.rb`, `fix-spec-bugs`, `green-ci` |
+| **Contracts before code** | A PRD becomes an acceptance contract of observable Given/When/Then rows. A separate pass audits it against the PRD, and the PR is gated on a scorecard, not on the builder's summary | `acceptance-criteria` → `review-acceptance-criteria` → `trace-requirements` → `verify-acceptance` |
+| **Untrusted text is data** | Fault messages, issue bodies and PR comments can carry injected instructions. Unattended runs treat them as data and stop when text tries to direct them | `fix-honeybadger` (auto mode), `resolve-issue/references/cloud-mode.md` |
+| **Least privilege, small blast radius** | Assume the agent will eventually do the wrong thing, and make the wrong thing cheap. Read-only production credentials, draft-only PRs, branch-locked pushes, and per-worktree databases and ports | `devops-expert`, `cloud-mode.md`, `worktree`, [`tooling/`](tooling/) |
+| **Humans decide; they don't babysit** | Approving every step trains people to click yes. The skills take the recommended option, record it under **Decisions**, and ask only about what matters, one plain-language question at a time | `resolve-issue`, `settle-pr-review`, `tweak` (interview, then one plan stop) |
+| **Machine-readable hand-offs** | Agents talk to scripts and to each other through fixed lines (`RESULT:`, `AUTO_RESULT:`, `AUTO_ISSUES:`), ledgers and files on disk, so runs resume after a crash and a poller can parse the outcome without another model call | `resolve-issues` ledger, `spec-sweep` ledger, `cloud-mode.md` |
+| **Right model for the job** | Implementation workers run on a cheaper, faster model; planning, review and the cold reviewer run on the strongest one | `build-feature` (`IMPLEMENT_MODEL`), `cold-review.md` |
+| **Skills are tested like code** | Skill instructions drift. The sweep and rotation skills ship evals with fixture files and expected behavior | `page-speed/evals/`, `refactor-sweep/evals/`, `spec-sweep/evals/` |
+| **Concurrency is designed, not hoped for** | Parallel agents collide on ports, databases and CPU. Every run gets its own worktree, and the one step that can't share (the full test suite) goes through a lock | `worktree`, `resolve-issues/scripts/ci-slot` |
+
+## Security
+
+The short version: no secrets, real identifiers or patient data are in this repo, and the skills are written so the agent's credentials, not its good behavior, set what it can do. The threat model and its limits are in [SECURITY.md](SECURITY.md).
 
 ## Skill catalog
 
@@ -189,6 +239,7 @@ The orchestrators above don't re-implement review, testing or CI. They call the 
 | `resolve-issue` | One GitHub issue → worktree → soundness chain → CI-green PR that closes the issue, with no approval stops |
 | `resolve-issues` | A batch of issues → one `/resolve-issue` sub-agent each, up to 3 in parallel, `bin/ci` serialized, ledger, table of PRs |
 | `fix-honeybadger` | Triage production faults; fix the urgent one fast, file a standalone issue for every other one |
+| `group-issues` | Merge auto-filed issues that one fix would resolve into a single combined issue before anything builds |
 | `settle-pr-review` | Decide a PR's cold review: ask only about what matters, handle the rest, record a `## Review decisions` comment |
 | `page-speed` | Slowest page from production Rails Pulse data → diagnosis → plan → soundness chain → PR; keeps a rotation log |
 | `refactor-sweep` | One structural refactor per run, behavior-locked and caller-audited, from a ranked queue |
@@ -273,6 +324,7 @@ Deep reference skills Claude loads when doing that kind of work:
 |---|---|
 | `honeybadger-audit` | Audit a file for missing error-monitoring notifications |
 | `impact-assessment` | Scope a production bug's blast radius and generate a remediation task |
+| `resolve-honeybadger` | Resolve faults whose fix is merged and deployed; reopen the issue when a fault fires after its fix |
 | `user-docs` | User-facing handbook doc for a feature (also the corpus for an in-app help assistant) |
 | `sync-user-docs` | Sync the user-doc corpus with everything deployed since the last sync, and open a PR |
 
@@ -287,7 +339,9 @@ These skills grew inside one Rails app, so they lean on a few conventions. Adapt
 - **`docs/APP_FEATURES.md`**: a sectioned catalog of your app's features. `/full-qa` and `/bug-hunt-all` iterate over its top-level sections.
 - **`.claude/prds/`**, **`.claude/acceptance-criteria/`**, **`.claude/audits/`**: where the planning and sweep skills read and write their artifacts.
 - **Honeybadger** for errors (`/fix-honeybadger` uses its MCP server) and **Rails Pulse** for performance data (`/page-speed`).
-- **Production safety**: the ops skills never run a production-targeting command without explicit per-command approval. The `claude-hook-prod-guard.py` PreToolUse hook in [`tooling/`](tooling/) enforces that. Production reads (`/page-speed`, `/impact-assessment`, `devops-expert`) assume read-only wrappers, `bin/prod-read` (Ruby on stdin) and `bin/prod-sql` (raw SQL), connecting as a read-only database role; these aren't shipped here. Writes are always run by the user, after a database snapshot.
+- **Production safety**: the real boundary is credentials. The agent's shell only holds read-only tokens (Fly, database role, cloud viewer), so a production write can't succeed from a Claude session; every write is run by the user, after a database snapshot, from a dry-run recipe that ends with a go / no-go line. The `claude-hook-prod-guard.py` PreToolUse hook in [`tooling/`](tooling/) is a tripwire on top: it pauses production-targeting commands for approval (and denies them in unattended runs).
+- **Assumed, not shipped** (app-specific; the skills say what they expect of each): `bin/prod-read` / `bin/prod-sql` (read-only production wrappers), `bin/hb-api` (read-only Honeybadger wrapper), `bin/gh-rest` (GitHub REST wrapper locked to one repo, draft PRs only), the cloud environment's pre-push hook that only allows run branches, and the autofix dispatcher.
+- **Platform**: written on macOS. `/resolve-honeybadger` reads its API token from the macOS Keychain.
 - **Built-ins**: `/review`, `/security-review` and `/simplify` are Claude Code built-in skills. The orchestrators call them, but they aren't part of this repo.
 - **Placeholders**: anything in `<angle-brackets>` (`<app-name>`, `<app-host>`, `<app>` for the database prefix, `<gcp-project>`, `<practice-name>`) or at `example.com` / `localhost:3000` is yours to fill in.
 

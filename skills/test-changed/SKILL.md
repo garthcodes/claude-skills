@@ -1,4 +1,5 @@
 ---
+name: test-changed
 description: Orchestrate parallel test generation/review for all changed components, jobs, models, policies, and services in the current branch — making sure the changed behavior is guarded by real assertions (proved with coverage + mutation probes), without padding. Native replacement for scripts/test-changed-all.sh. For a whole-suite cleanup use /spec-sweep instead.
 argument-hint: '[options] [base-branch]'
 ---

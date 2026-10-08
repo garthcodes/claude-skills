@@ -1,4 +1,5 @@
 ---
+name: create-qa-document
 description: Generate a QA plan document from branch changes, a feature description, or a feature-and-role pair for deep per-role QA (used by /full-qa)
 argument-hint: '[feature-description-or-blank-for-current-branch] [--role=ROLE] [--full-feature]'
 ---
@@ -207,7 +208,7 @@ Check which seed data is relevant to the feature being tested. **Always cross-ch
 | Portal token | Discover at runtime via `FormAssignment.with_valid_token.first.access_token` |
 
 **Seed Data Available:**
-- Full seed: ~690 clients across AZ and CO, ~1,100 appointments; worktrees usually run the mini
+- Full seed: ~690 clients across two states, ~1,100 appointments; worktrees usually run the mini
   seed (~50 clients, ~200 appointments). Both span 4 weeks past to 1 week ahead.
 - Clinical documents (progress notes, treatment plans, MSE, BPS)
 - Insurance policies and payers

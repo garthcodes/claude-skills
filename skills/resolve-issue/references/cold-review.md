@@ -93,6 +93,18 @@ Keep the heading exactly `## Cold review`, because `/settle-pr-review` finds the
 
 Run `gh pr ready <PR> --undo`. A merged PR that does something other than what was asked is the one outcome that is hard to undo, and a draft is one click to reverse. Don't rebuild; the user decides from the comment.
 
+## Cloud mode
+
+In a cloud autofix run (`cloud-mode.md`), the run has already run `/code-review high` itself and posted every finding as a `## Code review (high)` comment, fixing the bugs in its own code (`cloud-mode.md`, "Code review, then cold review"). The cold reviewer comes after that and stays on its own job:
+
+- Spawn it as usual (`Explore`), with `model: "opus"`.
+- Add to the brief, before "Read, in this order": "The `## Code review (high)` comment on the PR (`bin/gh-rest issue-comments <PR> --jq='[.[] | select(.body | startswith(\"## Code review\"))] | last | .body'`) lists the code review's findings and what the run did with each. Don't repeat them; do say if one marked fixed isn't, or one marked 'not a bug' is. The diff is <lines> lines across <files> files (`bin/gh-rest pr-view <PR> --jq='{additions, deletions, changed_files}'`): check that every hunk is needed for the fix; a hunk that isn't is scope creep, a `stop`."
+- In the brief's "Read" items, `gh pr view <PR>` becomes `bin/gh-rest pr-view <PR> --jq=.body` and `gh pr diff <PR>` becomes `bin/gh-rest pr-diff <PR>` (`cloud-mode.md`, "GitHub from the cloud").
+- `<STOP>` gains: "or it includes changes the fix doesn't need (scope creep)".
+- Post the comment with `bin/gh-rest comment <PR> --body-file <file>`. A `stop` can't use `gh pr ready --undo` (GraphQL only); the PR is a draft already, so instead add `needs-decision`: `bin/gh-rest label-add <PR> needs-decision`.
+
+Everything else (checking `verify` items, the `## Cold review` comment's shape) is unchanged, so `/settle-pr-review` reads it the same way.
+
 ## No Agent tool
 
 Some sub-agent contexts don't have the Agent tool. In that case, re-read your notes, review the PR yourself from the ask and `gh pr diff <PR>`, start the comment's first line with `cold review: self`, and post it the same way.

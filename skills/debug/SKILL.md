@@ -1,4 +1,5 @@
 ---
+name: debug
 description: Debug and analyze errors following best practices
 argument-hint: '[error-message] [context...]'
 ---

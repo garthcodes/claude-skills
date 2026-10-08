@@ -1,4 +1,5 @@
 ---
+name: bug-hunt
 description: Hunt for bugs in a feature using Playwright browser automation
 argument-hint: <feature-description>
 ---

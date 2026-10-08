@@ -1,4 +1,5 @@
 ---
+name: review-fixes
 description: Turn /review and /scale-review findings into a prioritized, executable fix-ticket document grounded in the PR/feature context
 argument-hint: '[review-file-or-latest] [scale-review-file-or-latest]'
 ---

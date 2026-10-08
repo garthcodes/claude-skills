@@ -1,4 +1,5 @@
 ---
+name: architect-review
 description: Analyze exploration and planning documents to identify potential improvements and suggest better solutions
 argument-hint: [plan-file-or-latest]
 ---

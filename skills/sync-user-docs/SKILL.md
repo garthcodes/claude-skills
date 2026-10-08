@@ -1,4 +1,5 @@
 ---
+name: sync-user-docs
 description: Sync docs/user_docs with everything deployed to production since the last sync — analyze the deployed diff, CRUD the user-doc corpus, and open a PR
 argument-hint: "[optional: baseline override — a SHA or ref to diff from instead of the recorded state]"
 ---

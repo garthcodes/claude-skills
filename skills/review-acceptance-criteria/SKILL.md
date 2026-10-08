@@ -1,4 +1,5 @@
 ---
+name: review-acceptance-criteria
 description: Audit an Acceptance Criteria contract against its PRD — completeness (nothing left out), fidelity (nothing extra or invented), verifiability, priorities — fix the contract in place, and stamp it PASS so /build-feature can gate on it
 argument-hint: [acceptance-criteria-path-or-blank]
 ---

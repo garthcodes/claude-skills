@@ -4,6 +4,11 @@
 -- covers the last ~day (operation rows are capped), so read it only when ops_loads >= 20.
 -- Usage: bin/prod-sql -v action='charts#show' -v from='2026-10-01 00:00' -v to=now -f .claude/skills/page-speed/queries/page_window.sql
 -- from/to are UTC (rails_pulse_deployments.started_at is UTC).
+-- Local times use -v tz=<IANA zone> (default UTC), e.g. -v tz=America/Chicago.
+\if :{?tz}
+\else
+\set tz UTC
+\endif
 \pset footer off
 with win as (
   select :'from'::timestamp as lo, (case when :'to' = 'now' then now()::timestamp else :'to'::timestamp end) as hi
@@ -39,9 +44,9 @@ select (select count(*) from reqs) as hits,
        (select round(n::numeric / nullif(loads, 0)) from ops) as sql_per_load,
        (select round(ms / nullif(loads, 0)) from ops) as sql_ms_per_load;
 
-\echo '== Deploys since from (MST) =='
+\echo '== Deploys since from (local time) =='
 select id, left(revision, 12) as revision,
-       to_char(started_at at time zone 'UTC' at time zone 'America/Phoenix', 'MM/DD HH12:MI AM') || ' MST' as started_mst,
+       to_char(started_at at time zone 'UTC' at time zone :'tz', 'MM/DD HH12:MI AM') as started_local,
        started_at as started_utc
 from rails_pulse_deployments
 where started_at >= :'from'::timestamp order by started_at;

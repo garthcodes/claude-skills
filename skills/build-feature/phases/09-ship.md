@@ -54,6 +54,8 @@ still failing, and the screenshots branch outcome once Step 3 runs.
 
 ### Step 3: Publish QA screenshots
 
+Screenshots go to GitHub, which is outside any data-protection boundary: they must show **seed data only, never PHI or real client data**. If a screenshot came from anything but local seed data, skip this step.
+
 ```bash
 if ls tmp/pr-screenshots/*.png >/dev/null 2>&1; then
   SHOT_BRANCH="screenshots/${FEATURE_NAME}"

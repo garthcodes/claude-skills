@@ -1,4 +1,5 @@
 ---
+name: prd
 description: Generate a build-ready PRD through codebase-grounded, question-driven discovery
 argument-hint: [brief feature idea]
 ---

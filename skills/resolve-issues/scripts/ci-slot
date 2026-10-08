@@ -3,9 +3,14 @@
 # standalone /resolve-issue runs. CLAUDE.md allows one bin/ci at a time; builds
 # may overlap, CI may not.
 #
-# Usage: ci-slot acquire <issue>   # block until the slot is ours, then until no foreign bin/ci runs
-#        ci-slot release <issue>   # free the slot if <issue> holds it (no-op otherwise)
-#        ci-slot status            # print the holder and how long it has held the slot
+# Usage: ci-slot acquire <issue> [max_secs]  # block until the slot is ours, then until no foreign bin/ci runs
+#        ci-slot release <issue>             # free the slot if <issue> holds it (no-op otherwise)
+#        ci-slot wait [max_secs]             # block until no bin/ci runs on this machine
+#        ci-slot status                      # print the holder and how long it has held the slot
+#
+# max_secs bounds the wait so a headless `claude -p` run (which ends the moment it
+# ends a turn, so it can't be woken by a background command) can block in the
+# foreground under the Bash tool's 10-minute cap: exit 75 means "not yet, run it again".
 #
 # The slot is a directory (mkdir is atomic) rather than a lockf lock, because it
 # is held across several tool calls: bin/ci -> /green-ci -> bin/ci again.
@@ -18,8 +23,17 @@ STALE_SECS=$((3 * 3600))
 POLL_SECS=30
 
 usage() {
-  echo "Usage: ci-slot acquire <issue> | release <issue> | status" >&2
+  echo "Usage: ci-slot acquire <issue> [max_secs] | release <issue> | wait [max_secs] | status" >&2
   exit 2
+}
+
+# Exit 75 (EX_TEMPFAIL) once max_secs has passed; no limit when max_secs is empty.
+check_deadline() {
+  local started="$1" max="$2" what="$3"
+  if [ -n "$max" ] && [ $(($(date +%s) - started)) -ge "$max" ]; then
+    echo "ci-slot: $what after $(($(date +%s) - started)) s; run the same command again" >&2
+    exit 75
+  fi
 }
 
 owner() { cat "$SLOT/owner" 2>/dev/null | cut -d' ' -f1; }
@@ -30,7 +44,7 @@ age() {
 }
 
 acquire() {
-  local issue="$1" started waited
+  local issue="$1" max="${2:-}" started waited
   started="$(date +%s)"
   mkdir -p "$MAIN_DIR/tmp"
   while true; do
@@ -46,10 +60,15 @@ acquire() {
       rm -rf "$SLOT"
       continue
     fi
+    check_deadline "$started" "$max" "still waiting for the slot (held by #$(owner))"
     sleep "$POLL_SECS"
   done
   # Another session may be running bin/ci outside this slot. c[i] keeps pgrep off its own pattern.
-  while pgrep -f 'ruby bin/c[i]' >/dev/null; do sleep "$POLL_SECS"; done
+  # The slot stays ours if the deadline hits here; the next acquire for this issue returns at once.
+  while pgrep -f 'ruby bin/c[i]' >/dev/null; do
+    check_deadline "$started" "$max" "holds the slot but another bin/ci is still running"
+    sleep "$POLL_SECS"
+  done
   waited=$((($(date +%s) - started) / 60))
   echo "ci-slot: #$issue holds the slot (waited ${waited} min)"
 }
@@ -66,8 +85,21 @@ release() {
   fi
 }
 
+# For a bin/ci started with run_in_background: returns once it has exited.
+wait_for_ci() {
+  local max="${1:-}" started
+  started="$(date +%s)"
+  sleep 5 # let a just-started bin/ci show up in pgrep
+  while pgrep -f 'ruby bin/c[i]' >/dev/null; do
+    check_deadline "$started" "$max" "bin/ci still running"
+    sleep 10
+  done
+  echo "ci-slot: no bin/ci running (waited $(($(date +%s) - started)) s)"
+}
+
 case "${1:-}" in
-  acquire) [ -n "${2:-}" ] || usage; acquire "${2#\#}" ;;
+  acquire) [ -n "${2:-}" ] || usage; acquire "${2#\#}" "${3:-}" ;;
+  wait) wait_for_ci "${2:-}" ;;
   release) [ -n "${2:-}" ] || usage; release "${2#\#}" ;;
   status)
     if [ -d "$SLOT" ]; then

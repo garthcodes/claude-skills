@@ -1,4 +1,5 @@
 ---
+name: plan-system-tests
 description: Plan the system tests needed for a feature — analyzes code, identifies what's worth covering at the browser layer, and produces a scenario-level plan for system-test-expert to implement and fix-system-test to debug.
 argument-hint: [feature-description | plan-doc-path | blank-for-current-branch]
 ---

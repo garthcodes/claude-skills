@@ -8,10 +8,18 @@ permission allowlist entries. Staging-targeted commands (<PROD_APP>-staging /
 fly.staging.toml) pass through untouched.
 
 Output contract: on a production-targeting command, emit a PreToolUse
-permissionDecision of "ask" and exit 0. On no match, print nothing. On any
-internal error, fail CLOSED (ask) — never silently allow.
+permissionDecision of "ask" and exit 0 ("deny" when the session is unattended:
+HB_AUTOFIX=1 or CLAUDE_UNATTENDED=1, because nobody is there to answer a prompt).
+On no match, print nothing. On any internal error, fail CLOSED — never silently allow.
+
+This is a tripwire, not a security boundary. It reads the command text, so a determined
+caller can still hide a production command (a variable holding the binary name, a script
+file written in an earlier tool call). The real boundary is credentials: the agent's own
+Fly, database and cloud credentials should be read-only. `tooling/hooks/test_prod_guard.py`
+lists what the hook does and does not catch.
 """
 import json
+import os
 import re
 import sys
 
@@ -19,16 +27,34 @@ import sys
 PROD_APP = "<app-name>"
 STAGING_APP = f"{PROD_APP}-staging"
 
-# Shell separators that delimit independent command invocations.
-SEGMENT_SPLIT = re.compile(r"(?:&&|\|\||;|\||\n)")
+# Shell separators that delimit independent command invocations. `&` (background) and command
+# substitution (`$(...)`, backticks, subshell parens) start a new command too.
+SEGMENT_SPLIT = re.compile(r"(?:&&|\|\||;|\||&|\n|\$\(|`|\(|\))")
 
-# fly/flyctl used as a command word (not e.g. the filename fly.toml).
-FLY_CMD = re.compile(r"(?:^|[\s;&|(`])(?:fly|flyctl)\s+\w")
+# Quote and escape characters the shell removes before running a word: `"fly"`, `fl''y` and `f\ly`
+# all run fly. Deleting them first means the patterns below see the word the shell will run.
+QUOTE_CHARS = re.compile(r"[\"'\\]")
 
-# Explicit staging targeting within one invocation.
+# fly/flyctl/flyadmin as a word anywhere in a segment: after whitespace, a path (`/opt/homebrew/bin/fly`)
+# or an assignment (`F=fly`), and followed by whitespace or the end. `fly.toml` doesn't match.
+FLY_WORD = re.compile(r"(?:^|[\s/=])(?:fly|flyctl|flyadmin)(?=\s|$)")
+
+# Explicit staging targeting. Only checked in the text AFTER the fly word, with any `# comment` removed,
+# so `fly status -a <app>-staging & fly deploy` and `fly deploy # -a <app>-staging` don't count as staging.
 STAGING_TARGET = re.compile(
-    r"--config[=\s]+\S*fly\.staging\.toml|(?:^|\s)(?:-a|--app)[=\s]+" + re.escape(STAGING_APP) + r"(?![\w-])"
+    r"--config[=\s]+\S*fly\.staging\.toml(?=\s|$)|(?:^|\s)(?:-a|--app)[=\s]+" + re.escape(STAGING_APP) + r"(?![\w.-])"
 )
+SHELL_COMMENT = re.compile(r"(?:^|\s)#.*$")
+
+# Segments whose command word only reads or prints text. A fly word inside them is an argument
+# (`grep fly docs/`, `gh pr create --body "...flyadmin deploy..."`), not a command, unless the segment
+# also writes a file (`echo fly deploy > x.sh`).
+TEXT_ONLY_COMMANDS = {
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf", "cat", "head", "tail", "less",
+    "wc", "ls", "git", "gh",
+}
+ASSIGNMENT = re.compile(r"^\w+=")
+PLACEHOLDER = re.compile(r"<[\w.-]+>")
 
 # Explicit production app flag anywhere (covers scripts wrapping fly).
 PROD_APP_FLAG = re.compile(r"(?:^|\s)(?:-a|--app)[=\s]+" + re.escape(PROD_APP) + r"(?![\w-])")
@@ -39,13 +65,13 @@ BIN_DEPLOY = re.compile(r"(?:^|[\s;&|(`])(?:\./)?bin/deploy(?![\w-])(?!\s+stagin
 # The TRUNCATE-everything rake namespace.
 PRODUCTION_RESET = re.compile(r"\bproduction_reset\b")
 
-GCLOUD_CMD = re.compile(r"(?:^|[\s;&|(`])gcloud\s+\w")
-GSUTIL_CMD = re.compile(r"(?:^|[\s;&|(`])gsutil\s+\w")
+GCLOUD_CMD = re.compile(r"(?:^|[\s/=])gcloud\s+\w")
+GSUTIL_CMD = re.compile(r"(?:^|[\s/=])gsutil\s+\w")
 GCLOUD_MUTATING = re.compile(
     r"\b(?:add-iam-policy-binding|remove-iam-policy-binding|set-iam-policy|"
     r"create|delete|undelete|destroy|update|rotate|enable|disable|import|deploy|"
     r"rm|mv|rsync)\b"
-    r"|\bstorage\s+cp\b|\bsecrets\s+versions\s+add\b|\bconfig\s+set\b"
+    r"|\bstorage\s+cp\b|\bsecrets\s+versions\s+(?:add|access)\b|\bconfig\s+set\b"
 )
 GSUTIL_MUTATING = re.compile(
     r"\b(?:rm|cp|mv|rsync|setmeta|setacl|defacl|ch|mb|rb|compose|rewrite|retention)\b"
@@ -65,8 +91,13 @@ INERT_HEREDOC = re.compile(
 
 ANY_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
 
+# Only heredocs written to a document file are exempt; a body written to a script (or to a file the
+# same command then runs) is checked like any other command.
+INERT_OUTPUT_EXT = re.compile(r"\.(?:md|txt|json|html|csv|log|patch|diff)$")
+
+
 def strip_inert_heredoc_bodies(command):
-    """Drop the bodies of top-level inert `cat > file <<'EOF'` heredocs; every other line is checked."""
+    """Drop the bodies of top-level inert `cat > file.md <<'EOF'` heredocs; every other line is checked."""
     lines = command.split("\n")
     if any(line.count("<<") > 1 for line in lines):
         return command  # several heredocs on one line: don't try to be clever
@@ -76,7 +107,8 @@ def strip_inert_heredoc_bodies(command):
         kept.append(line)
         inert = INERT_HEREDOC.search(line)
         other = ANY_HEREDOC.search(line)
-        if inert and (inert.group("out1") or inert.group("out2")):
+        out = inert and (inert.group("out1") or inert.group("out2"))
+        if out and INERT_OUTPUT_EXT.search(out) and not runs_file(command, out):
             tag, drop = inert.group("tag"), True
         elif other:
             tag, drop = other.group(2), False  # any other heredoc: keep its body, never look inside it
@@ -94,9 +126,28 @@ def strip_inert_heredoc_bodies(command):
     return "\n".join(kept)
 
 
+def runs_file(command, path):
+    """True when the command also executes `path` (bash x.md, sh x.md, source x.md, . x.md, ./x.md)."""
+    name = re.escape(path.lstrip("./"))
+    return re.search(r"(?:\b(?:bash|sh|zsh|source)\s+|(?:^|[\s;&|])\.\s+|(?:^|[\s;&|])\./)(?:\./)?" + name + r"(?![\w.])", command) is not None
+
+
+def command_word(segment):
+    """The segment's command name: first word after any leading VAR=value assignments, path stripped."""
+    for word in segment.split():
+        if not ASSIGNMENT.match(word):
+            return word.rsplit("/", 1)[-1]
+    return ""
+
+
+def text_only(segment):
+    writes_file = ">" in PLACEHOLDER.sub("", segment)  # `<app-name>` is a placeholder, not a redirect
+    return command_word(segment) in TEXT_ONLY_COMMANDS and not writes_file
+
+
 def production_reason(command):
     """Return a short reason string if the command targets production, else None."""
-    command = strip_inert_heredoc_bodies(command)
+    command = QUOTE_CHARS.sub("", strip_inert_heredoc_bodies(command))
     if PROD_APP_FLAG.search(command):
         return f"targets Fly app {PROD_APP}"
     if PRODUCTION_RESET.search(command):
@@ -105,8 +156,11 @@ def production_reason(command):
         return "bin/deploy without the staging argument deploys production"
 
     for segment in SEGMENT_SPLIT.split(command):
-        if FLY_CMD.search(segment) and not STAGING_TARGET.search(segment):
-            return f"fly/flyctl command not explicitly targeting staging defaults to production ({PROD_APP})"
+        if text_only(segment):
+            continue
+        fly = FLY_WORD.search(segment)
+        if fly and not STAGING_TARGET.search(SHELL_COMMENT.sub("", segment[fly.end():])):
+            return f"fly command not explicitly targeting staging defaults to production ({PROD_APP})"
         if GCLOUD_CMD.search(segment) and GCLOUD_MUTATING.search(segment):
             return "mutating gcloud command against the production GCP project"
         if GSUTIL_CMD.search(segment) and GSUTIL_MUTATING.search(segment):
@@ -114,11 +168,15 @@ def production_reason(command):
     return None
 
 
+def unattended():
+    return os.environ.get("HB_AUTOFIX") == "1" or os.environ.get("CLAUDE_UNATTENDED") == "1"
+
+
 def ask(reason):
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "ask",
+            "permissionDecision": "deny" if unattended() else "ask",
             "permissionDecisionReason": (
                 f"Production-targeting command ({reason}) — requires explicit user "
                 "approval. Production actions must never run automatically."

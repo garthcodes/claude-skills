@@ -1,4 +1,5 @@
 ---
+name: scale-review
 description: Analyze a feature's architecture for launch-scale readiness against your defined scale target (e.g. 2,000 users, 40K transactions/week)
 argument-hint: <feature-description>
 ---

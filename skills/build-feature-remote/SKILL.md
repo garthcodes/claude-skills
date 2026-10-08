@@ -1,4 +1,5 @@
 ---
+name: build-feature-remote
 description: Kick off /build-feature as a one-shot cloud routine on Opus, given a PRD path — for builds you don't want to babysit locally
 argument-hint: <path-to-prd.md>
 ---
@@ -35,24 +36,24 @@ git status --porcelain -- "${PRD_PATH}"
 git log origin/main..HEAD -- "${PRD_PATH}"
 ```
 
-- If the file is untracked or has uncommitted changes, commit it (docs-only commit) and push
-  directly to `main`:
+- If the file is untracked, has uncommitted changes, or has commits that haven't reached
+  `origin`, put it on its own docs branch and push that branch — **never push to `main`**:
   ```bash
+  git switch -c "docs/prd-${FEATURE_NAME}"        # or `git switch` to it if it already exists
   git add "${PRD_PATH}"
   git commit -m "docs: add PRD for cloud build (${FEATURE_NAME})"
-  git push origin main
+  git push -u origin "docs/prd-${FEATURE_NAME}"
+  git switch -                                     # back to where the user was
   ```
-  PRDs are plain planning docs already tracked straight on `main` in this repo (see how prior
-  PRDs were committed) — this is consistent with existing practice, not a new risk.
-- If the file is committed locally but those commits haven't reached `origin/main`, push
-  `main` (fast-forward only — **never force-push**).
-- If the push is rejected because `main` has diverged, stop and tell the user to pull/rebase
-  first rather than forcing anything.
+  The cloud run branches its feature branch off `docs/prd-${FEATURE_NAME}`, so the PRD
+  commit ships inside the feature PR and gets reviewed with it.
+- If the PRD is already on `origin/main`, push nothing and tell the cloud run to branch off `main`.
+- If the push is rejected, stop and tell the user rather than forcing anything (**never force-push**).
 - Tell the user what you committed/pushed, if anything.
 
 **Acceptance-criteria contract:** check whether `.claude/acceptance-criteria/${FEATURE_NAME}.md`
 exists locally. If it does, run the same status check on it and commit/push it alongside the
-PRD (same docs-only commit is fine: `docs: add PRD + acceptance criteria for cloud build
+PRD on the same docs branch (same docs-only commit is fine: `docs: add PRD + acceptance criteria for cloud build
 (${FEATURE_NAME})`) — the remote `/build-feature` gates on this file, so a reviewed contract
 left unpushed would be silently regenerated unreviewed. If it does not exist, note to the user
 that the remote `/build-feature` will generate it (`/acceptance-criteria`) and review it
@@ -78,10 +79,15 @@ You are running unattended in a headless cloud environment:
   skip only that phase, clearly note in the PR description that browser verification was
   skipped, and continue rather than aborting the pipeline. Fall back to the non-browser
   test suite (bin/ci, rspec) wherever possible instead.
-- Work on a feature branch (feature/${FEATURE_NAME}); never commit or push directly to main.
+- Start from the PRD's branch: `git fetch origin docs/prd-${FEATURE_NAME} && git switch -c
+  feature/${FEATURE_NAME} origin/docs/prd-${FEATURE_NAME}` (or off origin/main if Step 2
+  pushed nothing). Never commit or push directly to main.
 - Carry the pipeline all the way through to opening a pull request against main on
-  github.com/<owner>/<repo>. Do not stop for confirmation at any step; record unresolved
-  issues in the PR's Known Issues section per /build-feature's own error-handling policy.
+  github.com/<owner>/<repo>. Nobody is watching, so don't wait for confirmation: where the
+  pipeline would normally ask, take the recommended option and record it, and record
+  unresolved issues in the PR's Known Issues section per /build-feature's own
+  error-handling policy. The run's guards still apply: the PR is the only output, nothing
+  is merged, and nothing touches production.
 
 At the end, report what was built, what passed, what was skipped, and the PR URL.
 ```
@@ -109,7 +115,7 @@ Call `RemoteTrigger`:
       "ccr": {
         "environment_id": "<your-environment-id>",
         "session_context": {
-          "model": "claude-opus-4-8",
+          "model": "<model-id>",
           "sources": [{"git_repository": {"url": "https://github.com/<owner>/<repo>"}}],
           "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Skill", "Task", "Agent", "Workflow", "WebFetch"]
         },
@@ -126,10 +132,10 @@ Call `RemoteTrigger`:
 }
 ```
 
-`<your-environment-id>` is the cloud environment already used by this repo's existing
-routines — default to it without asking. `model` is always `claude-opus-4-8` for this
-skill; that's the whole point of it (use `/build-feature` locally, or the plain `/schedule`
-skill, for other models).
+`<your-environment-id>` is the id of the cloud environment you set up for this repo (list
+yours with `RemoteTrigger` `action: "list"` and ask the user if there is more than one).
+`<model-id>` is the most capable model available to you; a long unattended pipeline is
+where it pays for itself.
 
 `Task`, `Agent`, and `Workflow` are included in `allowed_tools` because `/build-feature`
 launches its own sub-agents internally (nine sequential phase agents sharing one worktree — the

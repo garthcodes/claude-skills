@@ -1,4 +1,5 @@
 ---
+name: merge-main
 description: Merge origin/main into the current branch, resolve every conflict correctly (keeping both sides' intent), verify, then commit and push
 argument-hint: [optional: --no-push to stop after the merge commit]
 allowed-tools: Bash(git:*), Bash(bin/standardrb:*), Bash(bin/rails:*), Bash(bundle:*), Read, Edit, Grep, Glob

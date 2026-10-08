@@ -1,4 +1,5 @@
 ---
+name: code
 description: Execute implementation plans efficiently using specialized agents for rapid development
 argument-hint: '[tickets-fixplan-or-plan-file, or latest] [— scope: Phase N | TICKET-… | P0–P2]'
 ---

@@ -1,4 +1,5 @@
 ---
+name: impact-assessment
 description: Assess the impact of a production bug (scope, duration, affected data) and generate a rake task to remediate any data issues
 argument-hint: <fault-id-or-description> [root-cause-summary]
 ---
@@ -18,7 +19,7 @@ If the root cause is not yet known, run `/fix-honeybadger` or `/debug` first.
 
 ## Key Constraint
 
-Claude has **read-only** access to the production database through `bin/prod-read` / `bin/prod-sql` (`claude-ro` user; see CLAUDE.md "Production Safety" and `docs/PROD_READ_ACCESS.md`) and **no** write access. This skill produces two scripts:
+Claude has **read-only** access to the production database through `bin/prod-read` / `bin/prod-sql` (a read-only database user; see CLAUDE.md "Production Safety" and `docs/PROD_READ_ACCESS.md`) and **no** write access. This skill produces two scripts:
 1. **Diagnostic script** — read-only; Claude runs it against production itself with `bin/prod-read`, outputs JSON with affected record IDs and details
 2. **Remediation rake task** — accepts the diagnostic output as input, fixes the affected records; the **user** runs it in production after a database snapshot
 
@@ -312,7 +313,7 @@ Ask the user to confirm:
 If this skill is being run alongside `/fix-honeybadger` (worktree exists):
 
 ```bash
-cd $WORKTREE_DIR
+cd "$WORKTREE_DIR"
 git add lib/tasks/diagnose_<short_description>.rake lib/tasks/remediate_<short_description>.rake
 git commit -m "$(cat <<'EOF'
 Add diagnostic and remediation scripts for Honeybadger fault #<fault_id>

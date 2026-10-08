@@ -1,4 +1,5 @@
 ---
+name: worktree-sweep
 description: Clean up old worktrees (pipeline .claude/worktrees/* and sibling ../<app>-*) while keeping the current or relevant ones — stops their dev servers, drops their databases, removes the worktrees. Keeps any worktree with uncommitted or unpushed work, an open PR, a running Claude session, or no PR and changes in the last 24 hours. Use when the user says /worktree-sweep, "clean up worktrees", "kill the old worktrees", "remove merged worktrees", "free up ports", or bin/worktree-port reports no free port. `--all` removes every worktree with no checks.
 allowed-tools: Bash(bin/worktree-sweep:*), Bash(cd:*), Bash(git worktree:*)
 ---

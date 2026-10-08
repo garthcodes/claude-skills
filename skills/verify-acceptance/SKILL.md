@@ -1,4 +1,5 @@
 ---
+name: verify-acceptance
 description: Score every row of the reviewed Acceptance Criteria contract (.claude/acceptance-criteria/<slug>.md) against QA results, system tests, and spec evidence — report-only, produces the scorecard /build-feature gates the PR on
 argument-hint: [contract-or-prd-path-or-blank]
 ---

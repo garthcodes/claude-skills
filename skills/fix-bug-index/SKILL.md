@@ -1,4 +1,5 @@
 ---
+name: fix-bug-index
 description: Walk a QA bug-report INDEX.md and run /bug-hunt-fix on each unskipped item, then write a summary of what was fixed. Does not commit.
 argument-hint: <path-to-INDEX.md>
 ---

@@ -1,4 +1,5 @@
 ---
+name: frontend-review
 description: Review implementation plans to ensure front-end requirements are fully planned
 argument-hint: [plan-file-or-latest]
 ---

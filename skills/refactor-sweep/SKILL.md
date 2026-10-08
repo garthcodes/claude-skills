@@ -57,7 +57,7 @@ Read these once per run; the target's rule is the plan's yardstick and the PR qu
    Every PR body carries a `Refactor-target: <id>` line (Step 10). Open PRs → their targets are taken. Merged PRs → their `done` ledger line is already on `main` once you've pulled. Closed-unmerged PRs → the target goes back in the queue (nothing to do; it was never recorded on `main`).
 2. **Inventory**, reading the ledger as it is on `origin/main` (the main checkout may be on another branch or behind):
    ```bash
-   cd $MAIN_DIR && git fetch origin main
+   cd "$MAIN_DIR" && git fetch origin main
    git show origin/main:.claude/audits/refactor-sweep/ledger.jsonl > tmp/refactor-sweep-ledger.jsonl 2>/dev/null || : > tmp/refactor-sweep-ledger.jsonl
    bundle exec ruby $SKILLS/refactor-sweep/scripts/inventory.rb --ledger tmp/refactor-sweep-ledger.jsonl --top 20 [--kinds K] [--out tmp/refactor-sweep-queue.json]
    bundle exec ruby $SKILLS/refactor-sweep/scripts/inventory.rb --show '<id>'   # one target's details
@@ -146,7 +146,7 @@ If the plan turns out wrong in a way that changes scope (a hidden caller that ne
 ## Step 7: Prove nothing changed
 
 ```bash
-cd $WT
+cd "$WT"
 git diff --stat $LOCK_SHA -- spec/refactor_locks/          # must be empty
 bundle exec rspec spec/refactor_locks/<slug>/               # must be green
 ```
@@ -238,7 +238,7 @@ Follow `.claude/skills/resolve-issue/references/cold-review.md` with:
 
 ## Step 12: Hand off
 
-Keep the worktree. If this run created it, `open -n -a "Visual Studio Code" $WT`. Finish with one line each: the PR link; the target and its rule; lock (examples, probes); callers (rows, decisions); `bin/ci` against which main SHA; cold review (comment link, verify results); the next target in the queue (`inventory.rb --top 1`), so the user can run `/refactor-sweep` again.
+Keep the worktree. If this run created it, `open -n -a "Visual Studio Code" "$WT"`. Finish with one line each: the PR link; the target and its rule; lock (examples, probes); callers (rows, decisions); `bin/ci` against which main SHA; cold review (comment link, verify results); the next target in the queue (`inventory.rb --top 1`), so the user can run `/refactor-sweep` again.
 
 ## Guardrails
 

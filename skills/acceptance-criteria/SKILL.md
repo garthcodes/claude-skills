@@ -1,4 +1,5 @@
 ---
+name: acceptance-criteria
 description: Derive the Acceptance Criteria contract from a PRD — one observable Given/When/Then row per requirement, edge case, permission denial, and Out-of-Scope guard — written to .claude/acceptance-criteria/<slug>.md for /review-acceptance-criteria to audit and /build-feature to gate on
 argument-hint: [prd-path-or-blank]
 ---
