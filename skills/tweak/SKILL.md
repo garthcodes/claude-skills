@@ -68,7 +68,7 @@ Learn the feature well enough that every interview question is about *this* code
 - **Find its existing specs**: `spec/models|services|components|policies/…` for the touched files, and the feature's folder under `spec/system/` (`grep -rl` for the page or component name). These become the regression set in Step 6.
 - `git -C "$WT" log --oneline -10 -- <hot files>` shows recent changes and the PRs that built the feature. A PRD under `.claude/prds/` may explain the original intent.
 - Check the CLAUDE.md rules the change will touch: tenant scoping, SoftDeletable, Pundit roles (`Role::ROLES` is the truth), timezone and MM/DD/YYYY dates, UI copy discipline, Honeybadger context, no hand-edited `db/schema.rb`.
-- If prod data matters (how many rows, which statuses exist), read it only through `bin/prod-read` / `bin/prod-sql`, and print ids and counts, not PHI.
+- If prod data matters (how many rows, which statuses exist), read it only through `bin/prod-read` / `bin/prod-sql`, and print ids and counts, not PHI. For how often a page or job is used or fails, search the last 30 days of logs with `bin/prod-logs` (`docs/PROD_LOGS.md`).
 - If you need a broad sweep across many files, send it to an Explore agent searching `$WT` and keep only the conclusion.
 
 ## Step 4: Interview until you understand it

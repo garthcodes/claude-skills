@@ -93,7 +93,11 @@ mcp__honeybadger__list_fault_notices(project_id: <id>, fault_id: <fault_id>, lim
 
 Keep `limit: 1` (raise it only to compare a handful): each notice carries the full backtrace and environment and the default page overflows the tool output. If it still overflows, the result is saved to a file — pull out the app frames (`[PROJECT_ROOT]` paths) and `request.context` with a short `python3 -c 'import json…'` instead of reading it.
 
-Extract the error class and message, the application stack frames (skip gem/framework frames), the request URL and params or job arguments, environment, counts, and first/last seen. Show:
+Extract the error class and message, the application stack frames (skip gem/framework frames), the request URL and params or job arguments, environment, counts, and first/last seen.
+
+Then read what the logs saw around it with `bin/prod-logs` (read-only, 30 days; `docs/PROD_LOGS.md`): `bin/prod-logs --request-id <request id from the notice> --since 7d` for a request fault, or `bin/prod-logs 'jsonPayload.job="<JobClass>"' 'jsonPayload.outcome="error"' --since 7d` for a job fault. It shows what Honeybadger doesn't: the status and timings, the lines logged before the crash, retries and discards, and whether the same path or job also fails without notifying. Note the counts and timings in the plan; leave log message text out of issues and PRs. Skip this in the cloud (no gcloud credentials there).
+
+Show:
 
 ```
 Honeybadger Fault #<id>: <error class> — URGENT

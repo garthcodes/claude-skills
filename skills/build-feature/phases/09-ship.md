@@ -204,12 +204,16 @@ MSG
 
 ### Step 6: Rebase, push, and apply the Acceptance Gate
 
+`BASE_BRANCH` is the Identity value in `.claude/pipeline-state.md` (`main` when absent). It is an
+integration branch (e.g. `crm`) when the feature is one of a set that merges to main together.
+
 ```bash
-git fetch origin main
-git rebase origin/main
+BASE_BRANCH="${BASE_BRANCH:-main}"
+git fetch origin "${BASE_BRANCH}"
+git rebase "origin/${BASE_BRANCH}"
 ```
 
-- Clean rebase, nothing new on main → push.
+- Clean rebase, nothing new on the base branch → push.
 - Clean rebase over new main commits → smoke-run this feature's spec files, then push (full `bin/ci`
   already ran; repeat it only if the smoke check fails).
 - Conflicts → resolve preserving BOTH intents (prefer main's side in unrelated code); re-run the
@@ -222,8 +226,8 @@ git push -u origin "feature/${FEATURE_NAME}"
 
 Then the gate, from the `## Acceptance` verdict:
 
-- **PASS** → `gh pr create --title "feat: ${FEATURE_NAME}" --body-file tmp/pr-body.md`
-- **PASS WITH SHOULD GAPS** → `gh pr create --draft --title "feat: ${FEATURE_NAME}" --body-file tmp/pr-body.md`
+- **PASS** → `gh pr create --base "${BASE_BRANCH}" --title "feat: ${FEATURE_NAME}" --body-file tmp/pr-body.md`
+- **PASS WITH SHOULD GAPS** → `gh pr create --draft --base "${BASE_BRANCH}" --title "feat: ${FEATURE_NAME}" --body-file tmp/pr-body.md`
 - **FAIL** → **no PR.** The branch is pushed so nothing is lost; the state file, scorecard, and
   `tmp/pr-body.md` stay in place; return `GATE FAILED` with the unmet Must ACs. Do NOT open a draft
   "just to ship something", and do NOT edit the contract or PRD to make it pass.

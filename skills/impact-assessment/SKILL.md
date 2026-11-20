@@ -59,6 +59,15 @@ mcp__honeybadger__get_project_occurrence_counts(project_id: <id>, period: "day")
 mcp__honeybadger__get_project_report(project_id: <id>, report: "notices_by_user", start: "<first_seen>", stop: "<now>")
 ```
 
+Cross-check Honeybadger's counts with the production logs (`bin/prod-logs`, read-only, 30 days; `docs/PROD_LOGS.md`). Logs also catch failures Honeybadger never saw: errors that were rescued, job retries, and requests that returned 5xx without a notice.
+
+```bash
+bin/prod-logs 'jsonPayload.path="<affected path>"' --status 5xx --since 30d --limit 1000   # failed requests
+bin/prod-logs 'jsonPayload.job="<JobClass>"' 'jsonPayload.outcome="error"' --since 30d --limit 1000   # failed job runs
+```
+
+Record counts, ids and first/last timestamps only. Logs are kept for 30 days, so for an older first occurrence say the log count is partial.
+
 ### Step 3: Compile Duration Timeline
 
 Build a timeline from the data:

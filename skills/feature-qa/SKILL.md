@@ -290,7 +290,7 @@ Not a load test — just sanity checks while you're there:
 
 - Page load > 3s on a page with normal data → file as a Performance observation
 - A dropdown of 500+ items that blocks the main thread → observation
-- An N+1 obviously visible in server logs — run `flyctl logs -a <app-name>-staging` (or your host's equivalent) briefly while using the feature — file as observation
+- A page that loads noticeably slower than its neighbors with normal data → observation (staging logs carry one line per request with its duration, not SQL, so N+1s are found with Bullet in dev, not here)
 
 ### 3.11 Cross-feature touchpoints
 
@@ -311,12 +311,11 @@ This app is Rails 8 + Hotwire (Turbo + Stimulus) + Solid Queue. Watch for the pi
 - **CSRF failures** — A 422 on a form submit that otherwise looks fine is almost always a CSRF issue (missing/stale token). Check network response body.
 - **Stimulus controller connect errors** — Console errors like `Failed to load controller "foo"` or actions that silently do nothing often mean a controller never connected. Check the element for `data-controller="…"` and the action for `data-action="…"`.
 - **Flash messages** — After a successful write, the user should see a flash. If the redirect happens silently, file an OBS.
-- **Solid Queue async jobs** — If the feature dispatches a background job (reminders, PDFs, invoice charges, AI transcription), the UI success means "job queued," not "job done." Verify the downstream effect by waiting a reasonable time and refreshing. Run `flyctl logs -a <app-name>-staging --no-tail | tail -200` (or your host's equivalent) to see if the job actually ran and succeeded.
+- **Solid Queue async jobs** — If the feature dispatches a background job (reminders, PDFs, invoice charges, AI transcription), the UI success means "job queued," not "job done." Verify the downstream effect by waiting a reasonable time and refreshing. Keep `flyctl logs -a <app-name>-staging` (or your host's equivalent) tailing while you trigger it and look for the job's `perform` line with its outcome (staging logs are live only, so start the tail before the action).
 - **Honeybadger** — Any error you trigger should appear in Honeybadger. If a 500 happens and Honeybadger is silent, that's itself a bug (missing notify call).
 - **ActsAsTenant** — Multi-tenancy is structural. You won't see cross-tenant leaks. Focus on within-org role/data scoping instead.
 - **Timezone handling** — Stored values should be IANA identifiers (`America/Phoenix`), displayed as raw IANA. Any friendly name (`Arizona`, `Pacific Time`) anywhere in the UI is a bug.
 - **Date display** — All dates must be `MM/DD/YYYY`. Anything else is a bug.
-- **N+1 sniff** — While using the feature, tail `flyctl logs -a <app-name>-staging | grep -E 'Client Load|User Load|Appointment Load'` — if the same query repeats N times for a single page load, file a Performance observation.
 
 ---
 
@@ -710,7 +709,7 @@ When invoked in regression mode, at the end of the run:
 7. **FILE REPORTS AS YOU GO** — Screenshots are ephemeral. Don't batch.
 8. **BE A QA ENGINEER, NOT A SCRIPT RUNNER** — Question assumptions. If something works but looks wrong, file an observation.
 9. **READ THE POLICY** — For every authorization-relevant scenario, open the corresponding `app/policies/*.rb` and compare the UI's role gating against it.
-10. **WATCH LOGS WHEN DEBUGGING** — `flyctl logs -a <app-name>-staging --no-tail | tail -200` (or your host's equivalent) for recent activity while you have a failing request.
+10. **WATCH LOGS WHEN DEBUGGING** — `flyctl logs -a <app-name>-staging` (or your host's equivalent; live tail only) running while you reproduce a failing request, so you see its status and the lines around it.
 11. **VERIFY BEFORE DOCUMENTING** — Retry every bug once before filing. A flaky click is not a bug; file it as an OBS about reliability.
 12. **SHOW SCREENSHOTS INLINE** — After every screenshot, `Read` the PNG so the user actually sees it in the conversation.
 13. **CLEAN UP** — `mcp__playwright__browser_close` at the end. Remove any test records you created (document cleanup in `TEST_PLAN.md`).

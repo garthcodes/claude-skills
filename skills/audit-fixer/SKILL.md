@@ -62,7 +62,7 @@ Do not ask the user to confirm. Proceed directly into Phase 2.
 
 ## Phase 2: Fix Loop (one finding at a time)
 
-Work strictly serially — never plan or code two findings at once. Findings in the same audit frequently touch the same files (e.g. `process_era_service.rb`), and later findings must be planned against the tree as already modified by earlier fixes.
+Work strictly serially — never plan or code two findings at once. Findings in the same audit frequently touch the same files (e.g. `era_processor.rb`), and later findings must be planned against the tree as already modified by earlier fixes.
 
 For the first `pending` task, mark it `in_progress` via TaskUpdate, then:
 

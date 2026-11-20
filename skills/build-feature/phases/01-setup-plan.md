@@ -18,6 +18,7 @@ Create the worktree on `feature/${FEATURE_NAME}`, based on the launching checkou
 ```bash
 WORKTREE_PATH="${PRIMARY_DIR}/.claude/worktrees/${FEATURE_NAME}"
 BASE="$(git -C "${MAIN_DIR}" rev-parse HEAD)"
+BASE_BRANCH="$(git -C "${MAIN_DIR}" rev-parse --abbrev-ref HEAD)"   # the PR base: "main" normally; an integration branch (e.g. crm) when launched from one
 git -C "${PRIMARY_DIR}" worktree prune
 git -C "${PRIMARY_DIR}" worktree add "${WORKTREE_PATH}" -b "feature/${FEATURE_NAME}" "${BASE}"
 cd "${WORKTREE_PATH}"   # run EVERY later command from here
@@ -122,7 +123,7 @@ The plan is saved to `.claude/implementation-plan-*.md`.
 ## CHECKPOINT
 
 Create `.claude/pipeline-state.md` with the full schema from `_shared.md`: Identity (all values,
-`WORKTREE_PATH` from `pwd`, `PRIMARY_DIR`, `WORKTREE_PORT` from `.env`, `DB_SUFFIX`, `IMPLEMENT_MODEL`), Phase Log
+`WORKTREE_PATH` from `pwd`, `PRIMARY_DIR`, `BASE_BRANCH`, `WORKTREE_PORT` from `.env`, `DB_SUFFIX`, `IMPLEMENT_MODEL`), Phase Log
 with A1 checked, Artifacts with the exact implementation-plan path, Results with the contract
 coverage counts (ACs covered / total, guards in "Not Building").
 

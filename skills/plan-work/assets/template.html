@@ -1,0 +1,112 @@
+<title>Work Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column; the ordered list is the page, deploys/autofix/daily sit below as compact panels. */
+:root {
+  --bg: #f6f7f6; --surface: #ffffff; --fg: #1d2421; --muted: #5d6a64; --line: #dde3df;
+  --accent: #2f6f5e; --accent-soft: #e1eee9;
+  --bug: #b4372f; --bug-soft: #f8e4e2; --warn: #9a6a12; --warn-soft: #f6ecd6; --ok: #2c7a45; --ok-soft: #e0f0e4;
+  --sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121614; --surface: #1a201d; --fg: #e4ebe7; --muted: #95a39c; --line: #2b3430;
+  --accent: #7cc4ad; --accent-soft: #1e3a31;
+  --bug: #f08a80; --bug-soft: #3b1f1c; --warn: #e3b55a; --warn-soft: #3a2f17; --ok: #7fcf96; --ok-soft: #1c3424; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121614; --surface: #1a201d; --fg: #e4ebe7; --muted: #95a39c; --line: #2b3430;
+  --accent: #7cc4ad; --accent-soft: #1e3a31;
+  --bug: #f08a80; --bug-soft: #3b1f1c; --warn: #e3b55a; --warn-soft: #3a2f17; --ok: #7fcf96; --ok-soft: #1c3424; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 28px; }
+h1 { font-size: 26px; margin: 0; text-wrap: balance; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+.meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.headline { margin: 8px 0 0; font-size: 17px; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+.stat b { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+a { color: var(--accent); }
+a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+ol.list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+ol.list li { display: grid; grid-template-columns: 22px 2.2em minmax(0, 1fr); gap: 4px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
+ol.list li.done .body { opacity: .45; text-decoration: line-through; }
+.n { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; padding-top: 1px; }
+input[type=checkbox] { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.row1 { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
+.why { color: var(--muted); font-size: 14px; }
+.next { font-family: var(--mono); font-size: 12.5px; background: var(--accent-soft); color: var(--fg); border-radius: 4px; padding: 1px 6px; overflow-wrap: anywhere; }
+.chip { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; letter-spacing: .02em; white-space: nowrap; }
+.k-bug { background: var(--bug-soft); color: var(--bug); }
+.k-pr, .k-deploy { background: var(--ok-soft); color: var(--ok); }
+.k-daily, .k-decision { background: var(--warn-soft); color: var(--warn); }
+.k-issue, .k-project, .k-autofix { background: var(--accent-soft); color: var(--accent); }
+.size { color: var(--muted); font-size: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; display: grid; gap: 8px; align-content: start; }
+.panel h3 { margin: 0; font-size: 15px; }
+.panel ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.panel p { margin: 0; }
+.risk { color: var(--warn); font-size: 12.5px; }
+pre.cmd { margin: 0; font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow-x: auto; }
+.empty { color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="title"></h1>
+    <div class="meta" id="meta"></div>
+    <p class="headline" id="headline"></p>
+    <div class="stats" id="stats"></div>
+  </header>
+  <section><h2>Work list, in order</h2><ol class="list" id="list"></ol></section>
+  <section><h2>Deploys</h2><div class="grid" id="deploys"></div></section>
+  <section><h2>Autofix queue</h2><div class="grid" id="autofix"></div></section>
+  <section><h2>Ongoing projects</h2><div class="grid" id="projects"></div></section>
+</div>
+
+<script id="plan" type="application/json">/*__PLAN__*/</script>
+<script>
+const plan = JSON.parse(document.getElementById("plan").textContent);
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const link = (ref, url) => { if (!url) return el("span", "mono", ref); const a = el("a", "mono", ref); a.href = url; a.target = "_blank"; a.rel = "noopener"; return a; };
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { v ? localStorage.setItem(k, "1") : localStorage.removeItem(k); } catch {} } };
+
+$("title").textContent = plan.title;
+for (const m of plan.meta || []) $("meta").append(el("span", null, m));
+$("headline").textContent = plan.headline || "";
+for (const [label, value] of plan.stats || []) { const s = el("span", "stat"); s.append(el("b", null, value), " " + label); $("stats").append(s); }
+
+(plan.items || []).forEach((it, i) => {
+  const li = el("li"); const key = `plan-work:${plan.date}:${it.kind}:${it.ref || it.title}`;
+  const box = document.createElement("input"); box.type = "checkbox"; box.id = `item-${i}`; box.setAttribute("aria-label", `Done: ${it.title}`);
+  box.checked = !!it.done || !!store.get(key); li.classList.toggle("done", box.checked);
+  box.addEventListener("change", () => { store.set(key, box.checked); li.classList.toggle("done", box.checked); });
+  const body = el("div", "body"); const row = el("div", "row1");
+  row.append(el("span", `chip k-${it.kind}`, it.kind));
+  if (it.ref) row.append(link(it.ref, it.url));
+  row.append(el("strong", null, it.title));
+  if (it.size) row.append(el("span", "size", it.size));
+  body.append(row);
+  if (it.why) body.append(el("div", "why", it.why));
+  if (it.next) { const n = el("div"); n.append(el("span", "next", it.next)); body.append(n); }
+  li.append(box, el("span", "n", String(i + 1)), body); $("list").append(li);
+});
+
+function panel(parent, p) {
+  const d = el("div", "panel"); d.append(el("h3", null, p.name));
+  if (p.when) d.append(el("p", "why", p.when));
+  if (p.items?.length) { const ul = el("ul"); for (const x of p.items) { const li = el("li"); if (x.ref) li.append(link(x.ref, x.url), " "); li.append(x.title || ""); if (x.risk?.length) li.append(" ", el("span", "risk", x.risk.join(", "))); ul.append(li); } d.append(ul); }
+  else if (p.empty) d.append(el("p", "empty", p.empty));
+  if (p.note) d.append(el("p", "why", p.note));
+  if (p.commands) d.append(el("pre", "cmd", p.commands));
+  parent.append(d);
+}
+const fill = (id, list, none) => { if (!list?.length) $(id).append(el("p", "empty", none)); else list.forEach((p) => panel($(id), p)); };
+fill("deploys", plan.deploys, "Nothing waiting to deploy.");
+fill("autofix", plan.autofix, "Queue is idle.");
+fill("projects", plan.projects, "No ongoing projects.");
+</script>

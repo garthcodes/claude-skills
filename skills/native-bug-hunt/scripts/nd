@@ -1,9 +1,12 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# nd -- drive the Ruby Native preview app on the Android emulator and talk to
-# the dev-only debug beacon (lib/dev/native_debug_middleware.rb +
-# app/javascript/native_debug.js). Used by the /native-bug-hunt skill.
+# nd -- drive the <App> Dev app (Hotwire Native, development flavor) on the
+# Android emulator and talk to the dev-only debug beacon
+# (lib/dev/native_debug_middleware.rb + app/javascript/native_debug.js). Used
+# by the /native-bug-hunt skills and bin/native-qa. Install the app with the
+# /android-emulator skill first. `eval`, `tap`, `layout` and `log` also work
+# for the iOS Simulator (the beacon answers either platform).
 #
 #   nd eval '<js>'            run JS in the current page (use `return`), print the result
 #   nd tap '<selector>' [n]   tap the nth (default 0) visible element matching a CSS selector
@@ -15,14 +18,16 @@
 #   nd webview                the WebView's device-pixel box as JSON [x1, y1, x2, y2]
 #   nd layout                 layout snapshot, including offscreen interactive elements
 #   nd log [n]                last n beacon entries + non-asset request lines (default 20)
-#   nd url <tunnel-url>       put a URL on the emulator clipboard (for Paste URL)
+#   nd focus                  package of the app in front (e.g. com.android.chrome after an external link)
 #   nd relaunch               force-stop and relaunch the app
+#
+# ND_APP overrides the package (default com.example.app.dev).
 
 require "json"
 require "fileutils"
 require "open3"
 
-APP = "com.rubynative.demo"
+APP = ENV.fetch("ND_APP", "com.example.app.dev")
 ROOT = `git rev-parse --show-toplevel`.strip
 DIR = File.join(ROOT, "tmp/native_debug")
 COMMAND = File.join(DIR, "command.js")
@@ -144,7 +149,7 @@ when "log"
       case r["type"]
       when "layout"
         hidden = r["offscreenInteractive"].map { |d| "#{d["tag"]} #{d["text"].tr("\n", " ").inspect} y=#{d["rect"]["y"]}+#{d["rect"]["h"]}" }
-        "vh=#{r["innerHeight"]} safe=#{r["safeAreaTop"]}/#{r["safeAreaBottom"]} offscreen=[#{hidden.join(", ")}]"
+        "vh=#{r["innerHeight"]} scroll=#{r["scrollHeight"]} offscreen=[#{hidden.join(", ")}]"
       else "#{r["level"]} #{r["message"]} #{r["source"]}".strip
       end
     puts "#{e["at"][11, 12]} #{e["platform"]} #{r["type"].ljust(7)} #{r["url"]}  #{detail}"
@@ -154,22 +159,10 @@ when "log"
   out, _status = Open3.capture2("tail", "-n", "20000", dev_log)
   lines = out.scrub.lines
   puts lines.grep(/^(Started|Completed)/).grep_v(%r{/assets/|/cable|/__native_debug/}).last(count)
-when "url"
-  url = args.fetch(0)
-  adb("shell", "am", "start", "-n", "com.android.chrome/com.google.android.apps.chrome.Main",
-    "-a", "android.intent.action.VIEW", "-d", "about:blank")
-  sleep 3
-  bar = ui_nodes.find { |n| n["resource-id"].to_s.match?(/url_bar|search_box_text/) }
-  abort "Chrome's address bar not found (first-run screen?). Dismiss it and retry." unless bar
-  x1, y1, x2, y2 = bar["box"]
-  tap((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-  sleep 1
-  type_text(url)
-  adb("shell", "input", "keycombination", "113", "29") # Ctrl+A
-  adb("shell", "input", "keycombination", "113", "31") # Ctrl+C
-  key("escape")
-  adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
-  puts "Copied. Ruby Native is in front: tap Paste URL (`nd native` shows its bounds)."
+when "focus"
+  window = adb("shell", "dumpsys", "window")
+  focus = window[/mCurrentFocus=Window\{\S+ \S+ ([\w.]+)/, 1] or abort "no focused window"
+  puts focus
 when "relaunch"
   adb("shell", "am", "force-stop", APP)
   adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")

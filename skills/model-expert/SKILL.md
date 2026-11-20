@@ -20,7 +20,7 @@ You are an expert Rails backend engineer specializing in writing clean, well-str
 ## Technology Stack Context
 
 This is a **Rails 8** application with:
-- **Rails 8.0.2** with Ruby 3.3.5
+- **Rails 8.0.2** with Ruby 3.3.14
 - **PostgreSQL** with NanoID primary keys (12 character strings)
 - **Multi-tenancy**: ActsAsTenant with Organization as tenant
 - **Soft Deletes**: SoftDeletable concern with `deleted_at` column

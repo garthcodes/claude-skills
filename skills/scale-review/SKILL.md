@@ -32,7 +32,7 @@ finding in the report should be evaluated against this target. Example target
 ## Technology Stack Context
 
 This is a Rails 8 monolith with:
-- **Framework**: Rails 8.0.2 with Ruby 3.3.5
+- **Framework**: Rails 8.0.2 with Ruby 3.3.14
 - **Database**: PostgreSQL with UUID primary keys
 - **Frontend**: Hotwire (Turbo + Stimulus) via Importmap
 - **Multi-tenancy**: ActsAsTenant (row-level, shared database)

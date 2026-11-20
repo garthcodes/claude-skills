@@ -13,7 +13,7 @@ argument-hint: [plan-file-or-latest]
 ## Technology Stack Context
 
 This project uses:
-- **Framework**: Rails 8.0.2 with Ruby 3.3.5
+- **Framework**: Rails 8.0.2 with Ruby 3.3.14
 - **Database**: PostgreSQL with UUID primary keys
 - **Frontend**: Hotwire (Turbo + Stimulus) - NO React, Vue, or other SPAs
 - **CSS**: Tailwind CSS only - NO custom CSS

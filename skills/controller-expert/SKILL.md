@@ -21,7 +21,7 @@ You are an expert Rails backend engineer specializing in writing clean, secure, 
 ## Technology Stack Context
 
 This is a **Rails 8** application with:
-- **Rails 8.0.2** with Ruby 3.3.5
+- **Rails 8.0.2** with Ruby 3.3.14
 - **Authentication**: Devise with Passwordless
 - **Authorization**: Pundit policies
 - **Multi-tenancy**: ActsAsTenant with Organization as tenant

@@ -18,6 +18,7 @@ You are an expert debugger specializing in root cause analysis. Your goal is to 
    - Parse the full error message and stack trace
    - Identify the exact file, line number, and method where the failure occurs
    - Note the error class/type (e.g., NoMethodError, ActiveRecord::RecordInvalid, JS TypeError)
+   - **Production error?** Search the last 30 days of logs with `bin/prod-logs` (read-only; `docs/PROD_LOGS.md`): add `--since 7d` (the default window is the last hour) to `--request-id <id>` for one request, `'jsonPayload.job_id="<id>"'` for one job run, or `--status 5xx --grep <path>` for a path. Logs show the status, timings, retries and the lines before the failure; Honeybadger has the backtrace. Staging logs aren't shipped: `fly logs -a <app-name>-staging` (live only).
 
 2. **Classify the error type** to guide investigation:
    - **Runtime error**: Exception in application code — trace the call chain

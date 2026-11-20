@@ -1,6 +1,6 @@
 # claude-skills
 
-A working library of 76 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications: planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that chain all of them into end-to-end workflows.
+A working library of 89 [Claude Code](https://claude.com/claude-code) skills for building Rails 8 + Hotwire applications: planning, implementation experts, test generation, QA automation, and the **orchestrator skills** that chain all of them into end-to-end workflows.
 
 This is my real, day-to-day setup, genericized for sharing (app names, hosts and infra identifiers are replaced with placeholders). It's here so you can see how I work and borrow whatever is useful.
 
@@ -144,6 +144,30 @@ These controls limit what a manipulated run can do; they don't make manipulation
 
 **`/group-issues`** runs before anything builds. When several faults share one root cause (the same external service failing the same way, the same bug in different callers), it combines them into one issue so the pipeline ships one fix instead of five overlapping PRs. When it isn't sure, it leaves the issues separate.
 
+#### Feeding the queue, and shipping what it builds
+
+The pipeline only builds issues labeled `autofix-queue`, so the day-to-day work is deciding what goes in and getting what comes out to production:
+
+```
+/plan-work                            the day's ordered work list: bugs, PRs to settle, deploys, what to queue next
+/next-issues                          which open issues are worth queueing (read-only): ready, already done, blocked
+/issue-ready <N>  ·  /issues-ready    research → ask what an unattended run can't decide → rewrite as a standalone spec → queue
+        … autofix builds each one as a draft PR …
+/settle-autofix-prs                   settle and merge every open autofix PR, then hand off to /ready-deploy
+/ready-deploy                         bin/ci, read everything since the live revision, deploy plan, one checked step at a time
+```
+
+**`/issue-ready`** exists because an unattended run can't ask questions: it asks them up front, one at a time, splits anything too big for one run, and rewrites the issue so it stands alone. **`/issues-ready`** does the same for the top of a `/next-issues` report in one pass. **`/ready-deploy`** works out the deploy strategy from the diff (migrations, destructive changes that need a snapshot, tasks to run, new secrets, pieces that don't ship with the app deploy); the user runs every production command.
+
+Work too big for one issue lives on a **GitHub Projects board** instead: **`/project-new`** grooms a board of small draft cards, and the dispatcher builds its top card with **`/project-step`** whenever nothing else on that board is in flight. `/spec-sweep` runs from a board card the same way.
+
+#### Revenue-cycle audits
+
+```
+/rcm-audit      find the most expensive weakness in how the practice gets paid, prove it against production (read-only), file it
+/rcm-resolve    re-size every open finding from live data, rank by severity then dollars, hand the pick to /resolve-issue
+```
+
 ### 4. Settling a PR before merge
 
 ```
@@ -171,13 +195,13 @@ Two resumable sweeps for paying down debt without changing behavior:
 
 /spec-sweep                whole-suite unit-spec cleanup
  ├── sweep PR ──────────── parallel workers trim bloated specs; coverage never drops, every mutation probe is killed
- ├── bugs PR ───────────── /fix-spec-bugs: the app bugs workers found, fixed test-first
- └── cleanup PR ────────── dead code and duplication workers found: /plan → /architect-review → /code → /full-review
+ ├── issues ────────────── one GitHub issue per verified app bug, cleanup item and product question, ready for /issue-ready
+ └── board card ────────── "Continue spec sweep" on the project board, so the next sweep runs once this PR merges
 ```
 
 **`/refactor-sweep`** works a ranked queue of targets (callbacks that belong in services, model logic that belongs elsewhere, `call`-style services, fat jobs, partials without strict locals, non-resource routes, missing unique indexes), one per run. A refactor's whole promise is that nothing a user, a record, a job queue or an outside system sees is different afterwards, so most of its effort goes into proving that. First comes a **behavior lock**: specs that pin every observable effect of the code being moved, proven green on the old code before anything changes, and still passing unchanged afterwards. Then a **caller audit**: a table of every path that reaches the moved code, including the indirect ones grep misses. Progress is kept in a tracked ledger.
 
-**`/spec-sweep`** ranks every unit spec by bloat and fans batches out to parallel workers in their own worktrees. Each worker uses the matching test skill (`/model-test`, `/service-test`, `/policy-test`, `/viewcomponent-test-expert`, `/rspec-test-expert`) and is held to one yardstick, `rspec-test-expert/test-quality.md`. Workers commit one batch at a time to `chore/spec-sweep`, and the sweep resumes from its ledger. Along the way they report real app bugs and dead code, which become two stacked follow-up PRs. `/fix-spec-bugs` fixes each bug test-first: a regression spec that fails on the current code, the smallest root-cause fix, then proof the spec goes red again with the fix reverted. Behavior-changing findings become questions for you rather than silent changes. `--audit` reports without editing.
+**`/spec-sweep`** ranks every unit spec by bloat and fans batches out to parallel workers in their own worktrees. Each worker uses the matching test skill (`/model-test`, `/service-test`, `/policy-test`, `/viewcomponent-test-expert`, `/rspec-test-expert`) and is held to one yardstick, `rspec-test-expert/test-quality.md`. Workers commit one batch at a time to `chore/spec-sweep`, and the sweep resumes from its ledger. Along the way they report real app bugs and dead code, which become GitHub issues (one per verified bug, cleanup item or product question) ready for `/issue-ready`. `/fix-spec-bugs` fixes each bug test-first: a regression spec that fails on the current code, the smallest root-cause fix, then proof the spec goes red again with the fix reverted. Behavior-changing findings become questions for you rather than silent changes. `--audit` reports without editing.
 
 The narrower audits follow the same report → fix shape: `/time-display-audit` (every date/time the app renders, against per-surface timezone and format rules, then fixes every finding) and `/audit-fixer` (walks any severity-ranked audit document, `/plan` → `/code` per finding).
 
@@ -186,7 +210,9 @@ The narrower audits follow the same report → fix shape: `/time-display-audit` 
 ```
 /full-qa  →  /full-qa-fix            every section of docs/APP_FEATURES.md: QA plan → Playwright run → master bug index → fixes
 /bug-hunt-all  →  /fix-bug-index     the lighter version: /bug-hunt per section, then /bug-hunt-fix per bug
-/native-bug-hunt  →  /native-bug-hunt-fix     the same for the iOS/Android WebView shell, on the emulator
+/bug-hunt-orchestrator               /bug-hunt on one feature (or the branch), then /fix-bug-index on what it found
+/native-bug-hunt  →  /native-bug-hunt-fix     the same for the Hotwire Native iOS/Android shells, on the simulator/emulator
+/ios-simulator  ·  /android-emulator  build, install and launch the dev shell against local bin/dev
 /qa-branch                           hand QA: you watch in your own Chrome while it walks one scenario at a time
 ```
 
@@ -243,7 +269,15 @@ The short version: no secrets, real identifiers or patient data are in this repo
 | `settle-pr-review` | Decide a PR's cold review: ask only about what matters, handle the rest, record a `## Review decisions` comment |
 | `page-speed` | Slowest page from production Rails Pulse data → diagnosis → plan → soundness chain → PR; keeps a rotation log |
 | `refactor-sweep` | One structural refactor per run, behavior-locked and caller-audited, from a ranked queue |
-| `spec-sweep` | Whole-suite unit-spec cleanup with parallel workers, plus stacked bug-fix and cleanup PRs |
+| `spec-sweep` | Whole-suite unit-spec cleanup with parallel workers; files an issue per bug or cleanup found; runs locally or from a project-board card |
+| `plan-work` | The day's ordered work list from issues, PRs, the autofix queue and undeployed merges, rendered as one page |
+| `next-issues` | Read-only: which open issues to get ready for the autofix queue next |
+| `issue-ready` / `issues-ready` | Turn one issue (or the top of `/next-issues`) into a self-contained spec and queue it for autofix |
+| `settle-autofix-prs` | Settle and merge every open autofix PR, then `/ready-deploy` |
+| `ready-deploy` | Check main, read everything since the live revision, plan the deploy, walk it one verified step at a time |
+| `project-new` / `project-step` | Groom a GitHub Projects board of small cards / build the board's top card as one PR |
+| `rcm-audit` / `rcm-resolve` | Find and file the costliest revenue-cycle weakness / re-size open findings and dispatch the fix |
+| `bug-hunt-orchestrator` | `/bug-hunt` then `/fix-bug-index` on its results, each in its own sub-agent |
 | `full-review` | `/review` → `/scale-review` → `/review-fixes` → `/code` |
 | `test-changed` | Parallel spec generation/review for everything changed on the branch |
 | `green-ci` | Drive `bin/ci` to green, routing each failure to the right fixer |
@@ -316,7 +350,8 @@ Deep reference skills Claude loads when doing that kind of work:
 | `feature-qa` | Deep QA of one feature on staging, across roles |
 | `bug-hunt` / `bug-hunt-fix` | Hunt bugs in one feature / fix one and verify it in the browser |
 | `qa-branch` | Hand QA in your own Chrome: seeds data, signs in as the right role, walks one scenario at a time |
-| `native-bug-hunt` / `native-bug-hunt-fix` | Hunt and fix bugs in a Ruby Native (iOS/Android WebView shell) app on the Android emulator, reading inside the WebView via a dev-only debug beacon |
+| `native-bug-hunt` / `native-bug-hunt-fix` | Hunt and fix bugs in a Hotwire Native app on the Android emulator or iOS Simulator, reading inside the WebView via a dev-only debug beacon |
+| `ios-simulator` / `android-emulator` | Build, install and launch the Hotwire Native shell (dev build against local `bin/dev`, or the store build) |
 | `time-display-audit` | Audit every rendered date/time against per-surface timezone/format rules, fix every finding, drive `bin/ci` green |
 
 ### Production ops & docs
@@ -343,7 +378,7 @@ These skills grew inside one Rails app, so they lean on a few conventions. Adapt
 - **Assumed, not shipped** (app-specific; the skills say what they expect of each): `bin/prod-read` / `bin/prod-sql` (read-only production wrappers), `bin/hb-api` (read-only Honeybadger wrapper), `bin/gh-rest` (GitHub REST wrapper locked to one repo, draft PRs only), the cloud environment's pre-push hook that only allows run branches, and the autofix dispatcher.
 - **Platform**: written on macOS. `/resolve-honeybadger` reads its API token from the macOS Keychain.
 - **Built-ins**: `/review`, `/security-review` and `/simplify` are Claude Code built-in skills. The orchestrators call them, but they aren't part of this repo.
-- **Placeholders**: anything in `<angle-brackets>` (`<app-name>`, `<app-host>`, `<app>` for the database prefix, `<gcp-project>`, `<practice-name>`) or at `example.com` / `localhost:3000` is yours to fill in.
+- **Placeholders**: anything in `<angle-brackets>` (`<app-name>`, `<app-host>`, `<app>` for the database prefix, `<gcp-project>`, `<practice-name>`, `<owner>/<repo>`, `<App>` for the native scheme, `<dev-host>` for a wildcard-localhost domain) or at `example.com` / `localhost:3000` is yours to fill in.
 
 ## License
 

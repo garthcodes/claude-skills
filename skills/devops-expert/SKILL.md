@@ -97,7 +97,7 @@ fly deploy --config fly.staging.toml --build-arg GIT_REVISION=$(git rev-parse HE
 
 # Any flyctl command for staging uses --app flag
 fly status --app <app-name>-staging
-fly logs --app <app-name>-staging
+fly logs --app <app-name>-staging   # live only; staging logs aren't shipped to Cloud Logging
 fly secrets list --app <app-name>-staging
 ```
 
@@ -267,11 +267,19 @@ Success prints `Deploy notification complete.` A `[Honeybadger] Rescued an error
 
 ### Logs & Debugging
 
+Production logs are in Google Cloud Logging for 365 days; search them with `bin/prod-logs`
+(read-only, `docs/PROD_LOGS.md`). `fly logs` only tails what is happening right now: use it to watch
+a deploy or a live reproduction, never to look back.
+
 ```bash
+# Search the last 365 days (Claude runs these; read-only)
+bin/prod-logs --since 1d --errors                                # 5xx requests, failed jobs, crashes
+bin/prod-logs --request-id 6f1c0b8e-...                          # every line of one request (id from the error tracker)
+bin/prod-logs 'jsonPayload.job="ClaimSubmissionJob"' --since 1d  # one job class
+bin/prod-logs 'jsonPayload.source="runner"' --since 1d           # machine restarts, OOM kills
+
 # Tail live logs
 fly logs --app <app-name>
-
-# Tail logs for specific process
 fly logs --app <app-name> --process web
 fly logs --app <app-name> --process worker
 
@@ -564,7 +572,7 @@ curl -s -X POST \
    fly logs --app <app-name> | grep "release_command"
    ```
 2. **Common causes**:
-   - Migration failure: Check `fly logs` for ActiveRecord errors. Fix migration, redeploy.
+   - Migration failure: Check the release command output for ActiveRecord errors (`fly logs` during the deploy; afterwards `bin/prod-logs --grep 'db:prepare' --since 1h` names the release machine, then `bin/prod-logs 'jsonPayload.instance="<machine id>"' --since 1h` shows its whole run). Fix migration, redeploy.
    - Asset compilation failure: Usually a missing dependency. Check Dockerfile.
    - Health check failure: App boots but `/up` doesn't respond in time. Increase `grace_period` or fix boot time.
    - Release command timeout: `db:prepare` hangs or takes too long. Use `--wait-timeout 600` for longer timeout. If release already succeeded, redeploy with `--skip-release-command`.
@@ -595,7 +603,8 @@ fly deploy --config fly.staging.toml --detach
    ```
 2. **Check logs for errors**:
    ```bash
-   fly logs --app <app-name> --process web
+   bin/prod-logs --since 1h --errors          # what already happened
+   fly logs --app <app-name> --process web       # what is happening now
    ```
 3. **Check health endpoint directly**:
    ```bash
@@ -643,8 +652,9 @@ fly deploy --config fly.staging.toml --detach
    ```bash
    # Check worker machine is running
    fly machine list --app <app-name>
-   # Check worker logs
-   fly logs --app <app-name> --process worker
+   # Check job logs: one JSON line per job event (enqueue/start/perform/retry/discard)
+   bin/prod-logs 'jsonPayload.job!=""' --since 1h
+   bin/prod-logs 'jsonPayload.outcome="error"' --since 1d
    ```
 2. **Jobs backing up**:
    - Scale workers: `fly scale count worker=2 --app <app-name>`

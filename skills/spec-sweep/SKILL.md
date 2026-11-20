@@ -1,7 +1,7 @@
 ---
 name: spec-sweep
-description: Orchestrate a whole-suite quality sweep of the application's unit specs (models, services, components, policies, jobs, mailers, helpers, lib, tasks, channels, initializers). Ranks every spec by bloat, then fans batches out to parallel workers that each use the matching test skill (model-test, service-test, policy-test, viewcomponent-test-expert, rspec-test-expert) to trim the fat and prove what remains really tests the code (coverage never drops, every mutation probe is killed). Commits one batch at a time on chore/spec-sweep and is resumable through a ledger. At the end it opens the sweep PR plus two PRs stacked on it: one fixing the application bugs workers found (/fix-spec-bugs, test-first) and one cleaning up the dead code and duplication they found (/plan, /architect-review, /code, /full-review), with behavior-changing findings turned into questions for the user. Each follow-up PR gets a cold review posted as a PR comment. Use when the user wants to clean up, trim, de-bloat, audit, or "make sure the unit tests are actually good" across the test suite or a whole folder of specs, asks how much of the suite is fat, or says /spec-sweep. For only the specs touched by the current branch, use /test-changed.
-argument-hint: '[category|spec-glob ...] [--audit] [--dry-run] [--workers 4] [--batch-size 8] [--max-lines 2500] [--batches 8] [--no-followups]'
+description: Orchestrate a whole-suite quality sweep of the application's unit specs (models, services, components, policies, jobs, mailers, helpers, lib, tasks, channels, initializers). Ranks every spec by bloat, then fans batches out to parallel workers that each use the matching test skill (model-test, service-test, policy-test, viewcomponent-test-expert, rspec-test-expert) to trim the fat and prove what remains really tests the code (coverage never drops, every mutation probe is killed). Commits one batch at a time and is resumable through a ledger. At the end it opens the sweep PR, files a GitHub issue for every verified application bug, cleanup item (dead code, duplication) and product question the workers found, ready for /issue-ready, and leaves a "Continue spec sweep" card on the Spec sweep project board so the next sweep runs once the sweep PR merges. Runs locally or in the cloud as an autofix routine (`/spec-sweep auto project=<N> card=<id> run=<id>`, started by the dispatcher from the board's top Todo card). Use when the user wants to clean up, trim, de-bloat, audit, or "make sure the unit tests are actually good" across the test suite or a whole folder of specs, asks how much of the suite is fat, or says /spec-sweep. For only the specs touched by the current branch, use /test-changed.
+argument-hint: '[auto project=<N> card=<id> run=<id>] [category|spec-glob ...] [--audit] [--dry-run] [--workers 4] [--batch-size 8] [--max-lines 2500] [--batches 8] [--no-issues]'
 ---
 
 # Spec Sweep
@@ -27,18 +27,25 @@ files.
   and its source; past this it starts skimming. A larger single spec gets a batch of its own;
 - `--batches N` (default 8): batches to process this run. The sweep is resumable, so stopping is
   safe.
-- `--no-followups`: stop after the sweep PR (step 4); don't open the bugs and findings PRs.
+- `--no-issues`: don't file bug, cleanup or question issues (step 3 still writes them into the
+  report); the continuation card is still added;
+- `auto project=<N> card=<id> run=<id>`: **cloud mode**, started by the autofix dispatcher for
+  the top Todo card on the Spec sweep board `<N>`. Read `references/cloud.md` first; it wins where
+  it differs from this file (branch `autofix/run-<id>`, `bin/gh-rest`, no questions, smaller
+  defaults, result comments).
+
+Nobody answers questions in cloud mode. Locally, ask only where this file says to.
 
 Paths below: `SKILLS` = the absolute path of the directory containing this skill's parent (i.e.
 `<repo>/.claude/skills` in the checkout where this skill was loaded). Resolve it once and pass
-absolute paths to workers. Their worktrees branch from `chore/spec-sweep` and may predate these
+absolute paths to workers. Their worktrees branch from the sweep branch and may predate these
 skill files.
 
 ## 0. Preflight
 
 1. `bash $SKILLS/spec-sweep/scripts/worktrees.sh setup <workers>`. This creates or reuses the
    integration worktree `.claude/worktrees/spec-sweep` (branch `chore/spec-sweep`, cut from `main`
-   the first time) and the worker worktrees `spec-sweep-w1..N`, reset to the branch tip. It aborts
+   the first time; cloud mode sets `SWEEP_BRANCH=autofix/run-<id> SWEEP_BASE=origin/main`) and the worker worktrees `spec-sweep-w1..N`, reset to the branch tip. It aborts
    if the integration worktree is dirty; report that and stop, don't clean it yourself. The user's
    own checkout is never switched or touched.
 2. `cd` into the integration worktree for everything else. If `main` has moved and the user wants
@@ -51,19 +58,12 @@ skill files.
    `bin/ci`, another sweep, or someone's spec run. If something is running, tell the user and wait.
    Skipping the prepare when a DB is stale isn't an option either: `maintain_test_schema!` would
    rebuild it without seeds mid-sweep.
-4. Collect answers to earlier questions. List the ids in `.claude/audits/spec-sweep/findings.jsonl`
-   whose latest status is `decide`. An answer can come three ways: a comment on the last findings
-   PR naming the id (`gh pr view <n> --comments`), a filled-in `**Answer:**` line under the id in
-   its `findings-*.md` (setup lets that file be dirty; commit it now as `chore(spec-sweep): record
-   answers`), or the user telling you in this conversation. Append an `answered` line (with
-   `"answer"`) for each, or `wontfix` when the answer is to leave it as is. Say in one line how many
-   were answered and how many still wait, and don't block on the rest: unanswered questions carry
-   over, and step 3b builds the answered ones.
-5. Settle earlier follow-up PRs. For each `in_pr` entry, `gh pr view <n> --json state,baseRefName`:
-   append `fixed` for the merged ones. If the sweep PR has merged while a follow-up PR still
-   targets `chore/spec-sweep`, retarget it (`gh pr edit <n> --base main`) and say so. The repo
-   keeps merged branches, so GitHub won't retarget it, and merging it as it stands would land it on
-   the stale sweep branch instead of `main`.
+4. Settle earlier work in `.claude/audits/spec-sweep/findings.jsonl` (latest line per id wins):
+   - `in_pr` (from the old follow-up PRs): `gh pr view <n> --json state`; merged → append `fixed`;
+   - `issue`: `gh issue view <n> --json state,stateReason`; closed as completed → `fixed`, closed
+     as not planned → `wontfix`; open → leave it;
+   - `decide` with no `issue` yet (questions from before sweeps filed issues): step 3b files them.
+   Commit any appended lines with the ledger in step 2.6. Say in one line what was settled.
 
 ## 1. Inventory
 
@@ -154,194 +154,137 @@ closed. `failed` stays in the queue for the next run, so add a `note` the next w
 
 ## 3. Triage findings (every run, including `--audit`)
 
-Workers trip over two kinds of problems in the application code while pinning behavior. Both are
-worth more than the spec trimming, and both get turned into work here:
+Workers trip over problems in the application code while pinning behavior. They are worth more
+than the spec trimming, so each verified one becomes a GitHub issue the user takes through
+`/issue-ready`. Nothing here is built in this run, and no issue is queued (`autofix-queue` is the
+user's call, after `/issue-ready`).
 
-- **bugs**: code that behaves wrong. They go to a bug index that `/fix-spec-bugs` fixes test-first;
-- **findings**: code that works but shouldn't stay (dead code, duplication, unreachable guards,
-  questionable design). They go to a work order that the findings PR implements.
+- **bugs**: code that behaves wrong;
+- **fix items**: code that works but shouldn't stay (dead code, duplication, unreachable guards,
+  a hand-rolled copy of an existing helper), changeable without altering behavior;
+- **questions**: changes only someone who knows the product can decide (who may see what, a
+  limit, a default).
 
-Use a stamp `STAMP=$(date +%Y%m%d-%H%M)` for this run's files. All of them live in the integration
-worktree and are committed to `chore/spec-sweep`, so they travel with the sweep PR.
+Use a stamp `STAMP=$(date +%Y%m%d-%H%M)` for this run. Ensure the labels once:
+`gh label create from-spec-sweep --color C5DEF5 --force`, and `bug` / `needs-decision` if
+missing.
 
 ### 3a. Bugs
 
 1. **Collect** every `kind: "bug"` finding from this run's worker reports. Also take `design`
    findings that describe wrong behavior a user would experience (e.g. a limit that locks out
-   legitimate users). Carry over earlier runs' bugs too: any `docs/bug-reports/spec-sweep-*/BUG-*.md`
-   on this branch without a `## Fix Applied` section goes into this run's index as a link to its
-   original file (`../spec-sweep-<old stamp>/BUG-…md`), after the 3a.3 check below.
+   legitimate users).
 2. **Verify each one yourself.** Read the cited lines and their callers. When cheap, confirm with
-   a throwaway script (`echo '…' | TEST_ENV_NUMBER=9 bin/rails runner -`), or with an example run in
-   the integration worktree that you then delete. Mark it **Confirmed** (you saw it happen, or the
-   code path is unambiguous) or **Likely** (reasoned from code, not reproduced). Drop findings that
-   don't hold up, and count them for the report. An unverified bug list wastes the user's time.
-3. **Drop what's already handled.** Check `git log main --oneline -- <file>` since the batch's
-   commit, and the open PRs that touch the file (`gh pr list --state open --json number,title,files
-   --jq '.[] | select(any(.files[]; .path == "<file>")) | "\(.number) \(.title)"'`, then read
-   that PR's diff for the lines). A bug fixed on `main` or in an open PR is noted in the report,
-   not fixed again.
-4. **Write** `docs/bug-reports/spec-sweep-$STAMP/`: one `BUG-NNN-<slug>.md` per bug, numbered in
-   severity order, plus `INDEX.md`. Severity: **High** = security, PHI, money, or data loss;
-   **Medium** = a user is blocked or sees wrong data; **Low** = cosmetic, edge case, or latent (no
-   caller today). No PHI: ids and roles, never names. Each bug file:
+   an example run in the integration worktree that you then delete
+   (`TEST_ENV_NUMBER=9 bundle exec rspec <tmp spec>`). Mark it **Confirmed** (you saw it happen,
+   or the code path is unambiguous) or **Likely** (reasoned from code, not reproduced). Drop
+   findings that don't hold up, and count them for the report. An unverified bug issue wastes the
+   user's time.
+3. **Drop what's already handled.** Check `git log origin/main --oneline -- <file>` since the
+   batch's commit, the open PRs that touch the file (read their diffs for the lines), and open
+   issues: `gh issue list --state open --search "<file basename> in:body"`. A bug fixed on `main`,
+   in an open PR, or already filed is noted in the report, not filed again.
+4. **Severity:** **High** = security, PHI, money, or data loss; **Medium** = a user is blocked or
+   sees wrong data; **Low** = cosmetic, edge case, or latent (no caller today). No PHI anywhere:
+   ids and roles, never names.
 
-   ```markdown
-   # BUG-NNN: <title>
+### 3b. Fix items and questions
 
-   **Severity:** High | Medium | Low  **Status:** Confirmed | Likely
-   **Area:** <feature>  **Found by:** <batch id> (`<spec path>`)
-
-   ## Where
-   `<file>:<line>` (`<Class#method>`)
-
-   ## What happens
-   <the concrete scenario in plain language: who does what, what they see>
-
-   ## Why
-   <the code mechanism in 2–4 lines, quoting the line>
-
-   ## Evidence
-   <the repro, or the reasoning plus the example that would fail>
-
-   ## Regression spec
-   `<spec file the fix's example belongs in>`: <the assertion in one line, e.g.
-   `Scope.new(platform_admin, FeeSchedule).resolve` contains the practice's schedule>
-
-   ## Suggested fix
-   <one or two sentences, not a patch>
-   ```
-
-   `INDEX.md`: a title (`# Spec-sweep bugs: <run>`), a severity count table, then
-   `### High` / `### Medium` / `### Low` sections of
-   `- [BUG-NNN: <title>](BUG-NNN-<slug>.md) — <area>, <Confirmed|Likely>` bullets. That shape is
-   what `/fix-spec-bugs` reads; the user can add `[SKIP]` to a bullet to hold a bug back.
-
-### 3b. Findings
-
-1. **Collect** this run's `dead_code` and `design` findings that aren't bugs, plus every finding in
-   `.claude/audits/spec-sweep/findings.jsonl` whose latest status is `answered` (the user decided an
-   earlier question; see Preflight 4).
-2. **Drop repeats and what's handled.** A finding whose file and subject match a ledger entry with
-   status `fixed`, `in_pr`, `wontfix`, or `decide` is a repeat. Don't list it again (a still-open
-   `decide` question stays in its original file). Then apply 3a.3: skip anything fixed on `main` or
-   in an open PR, and say which.
+1. **Collect** this run's `dead_code`, `duplication` and `design` findings that aren't bugs, plus
+   every `findings.jsonl` entry whose latest status is `decide` or `open` with no `issue` yet
+   (earlier runs' items; they keep their ids).
+2. **Drop repeats and what's handled.** A finding whose file and subject match an entry with
+   status `fixed`, `in_pr`, `issue` or `wontfix` is a repeat. Then apply 3a.3.
 3. **Prove dead code is dead** before calling anything unused. Deleting code that's reached in a way
-   grep misses is the main risk of this PR, so a plain `grep -rn Name app lib` isn't enough. Check
-   each place Rails reaches code indirectly, and write down what you checked:
+   grep misses is the main risk, so a plain `grep -rn Name app lib` isn't enough. Check each place
+   Rails reaches code indirectly, and write down what you checked:
    - the name as a string or symbol: `grep -rn "Name\|name_snake\|:method_name" app lib config db
      spec/support` (`constantize`, `send`, `public_send`, `try`, `delegate`, callbacks named by
      symbol, `policy_class`, `policy_scope` resolution by model name);
    - routes (`bin/rails routes -g <name>`), `config/recurring.yml`, `lib/tasks`, `app/avo`,
      `config/initializers`, mailer previews, `app/javascript` (Stimulus data attributes, fetch
-     URLs), views and components (helpers and partials by name), and `docs/user_docs` mentions.
+     URLs), views and components (helpers and partials by name), `.claude/skills/`, and
+     `docs/user_docs` mentions.
 
-   Any hit you can't explain means it isn't dead: it becomes a `decide` item or is dropped.
+   Any hit you can't explain means it isn't dead: it becomes a question or is dropped.
 
    Code that has an entry point of its own (a routed controller action, a job, a rake task, an Avo
-   resource or action, a mailer action, a webhook handler) is never `fix`, however quiet the
-   search: something outside the codebase (a bookmark, a cron, an operator, a yearly billing run) can
-   still reach it, and no repo search can rule that out. It is always a `decide` item. Only code
-   with no entry point and no caller is `fix` dead code.
-4. **Triage** each finding into one of two groups:
-   - **fix**: the change can't alter what any user sees or what any record ends up holding.
-     Deleting proven-dead code, merging copies of the same check into one, removing guards that
-     can't be reached, replacing a hand-rolled helper with the existing one. These are built
-     automatically;
-   - **decide**: the change alters behavior, or only someone who knows the product can say what's
-     right (who may see what, a limit, a default). These become questions for the user. Each gets
-     a **recommendation** and a one-line **consequence** of each option, so the user can answer in a
-     few words.
+   resource or action, a mailer action, a webhook handler) is never a fix item, however quiet the
+   search: something outside the codebase (a bookmark, a cron, an operator, a yearly billing run)
+   can still reach it. It is always a question. Only code with no entry point and no caller is a
+   fix item.
+4. **Triage**: **fix** when the change can't alter what any user sees or what any record ends up
+   holding; otherwise **question**, with a **recommendation** and a one-line **consequence** of each
+   option, so the user can answer in a few words during `/issue-ready`.
 5. **Name each fix item's guard**: the spec that would catch a mistake in the refactor, and whether
    it is trustworthy: `swept` (the ledger has it `done`), `unswept` (exists but hasn't been
-   reviewed), or `none`. Refactoring under an untrustworthy spec is hoping, not checking, so the
-   findings PR writes or sweeps the guard first for `unswept` and `none` items (see
-   `references/followups.md`).
-6. **Write** `.claude/audits/spec-sweep/findings-$STAMP.md`:
+   reviewed), or `none`. The issue tells the builder to write or sweep an `unswept`/`none` guard
+   first, because refactoring under an untrustworthy spec is hoping, not checking.
 
-   ```markdown
-   # Spec-sweep findings: <run>
+### 3c. File the issues
 
-   ## Fix (built in the findings PR)
-   ### F-$STAMP-01: <title>
-   - **Where:** `<file>:<line>`  **Kind:** dead_code | duplication | unreachable | design
-   - **Change:** <what to do, one or two lines; for deletions, everything that goes with it>
-   - **Guard:** `<spec path>` (swept | unswept | none)
-   - **Evidence:** <for dead code: what was searched and came up empty>
-
-   ## Decide (your call: write an answer under any item, the next run builds it)
-   ### F-$STAMP-07: <question>
-   - **Where:** `<file>:<line>`
-   - **Today:** <what happens now, one line>
-   - **Recommend:** <option> — <why, one line>
-   - **If <option A>:** <consequence>  **If <option B>:** <consequence>
-   - **Answer:**
-   ```
-
-   Ids are `F-<stamp>-NN`, unique across runs, and an answered item from an earlier run keeps its
-   original id. Then append one line per finding to `findings.jsonl`:
-   `{"id":"F-…","source":"<file>:<line>","kind":"…","subject":"<the method, class or rule it is about>","triage":"fix|decide","status":"open|decide","run":"$STAMP","at":"<ISO>"}`.
-   The latest line per id is its current state. Statuses: `open` (fix item, not built yet),
-   `decide` (question asked), `answered` (user answered; add `"answer"`), `in_pr` (add `"pr"`),
-   `fixed` (merged), `wontfix` (user said leave it). Nothing reads it but this skill, so keep it
-   append-only and never rewrite history.
-7. Commit both 3a and 3b on `chore/spec-sweep`:
-   `chore(spec-sweep): bugs and findings for <run>`. Also keep appending raw worker findings to
-   `FINDINGS.md` per round (step 2.6). That file is the unverified log; the files above are the
-   verified work.
-
-In `--audit` mode there are no commits: put the bugs and findings sections in the audit report
-(section 6) instead and skip the follow-up PRs.
+Skip with `--no-issues` or `--audit` (put them in the report instead). Read
+`references/issues.md` for the three issue bodies (bug, fix item, question), the labels, and the
+`findings.jsonl` lines to append. Every bug, fix item and question gets an id `F-$STAMP-NN` (or keeps
+its earlier one) and exactly one issue. Then commit on the sweep branch:
+`chore(spec-sweep): findings for $STAMP` (the `findings.jsonl` lines plus the round log in
+`FINDINGS.md`, which stays the unverified raw log).
 
 ## 4. The sweep PR
 
 `bash $SKILLS/spec-sweep/scripts/worktrees.sh teardown` (keeps the integration worktree). Then:
 
-1. `git -C <integration worktree> push -u origin chore/spec-sweep`.
-2. `gh pr list --head chore/spec-sweep --state open --json number,url`. If there's no PR, open one
-   against `main` (`gh pr create --base main --head chore/spec-sweep`), modelled on the earlier
-   sweep PRs: a per-category table (specs done/skipped, lines and examples before→after, probes
-   killed/total), coverage notes, what the old specs hid, a short bugs-found list linking the bug
-   index, and a test plan. If the PR exists, don't rewrite its body: the user may have edited it.
-   Add this run as a PR comment (`gh pr comment`) with the same table and links.
+1. Push the sweep branch (`git push -u origin <branch>`).
+2. Find an open PR from it. If there's none, open one against `main`, modelled on the earlier
+   sweep PRs (#796): a per-category table (specs done/skipped, lines and examples before→after,
+   probes killed/total), coverage notes, what the old specs hid, the issues filed in step 3c (one
+   line each: `#N` severity/kind, title), and a test plan. In cloud mode its first line is
+   `Project-card: <card id> (board <N>)`. If the PR exists, don't rewrite its body: the
+   user may have edited it. Add this run as a PR comment with the same table and links.
 
 Never trigger CI (`gh workflow run` and friends): on GitHub it is user-triggered only (CLAUDE.md).
 
-## 5. Follow-up PRs (skip with `--no-followups`, `--audit`, `--dry-run`)
+## 5. The continuation card
 
-Two PRs stacked on the sweep PR, each built by a helper agent in its own worktree:
+The next sweep starts from the ledger on `main`, so it can only run once this sweep PR merges.
+The Spec sweep board takes care of that: the app moves this run's card to In review, then to Done
+when the PR merges, and only then starts the next Todo card. Leave exactly one continuation card,
+unless:
 
-- **Bugs PR** (`fix/spec-sweep-bugs-<YYYYMMDD>`): `/fix-spec-bugs` on the bug index, then
-  `/full-review`. Skip it when the index has no bugs left to fix.
-- **Findings PR** (`chore/spec-sweep-findings-<YYYYMMDD>`): `/plan` → `/architect-review` →
-  `/code`, one commit per finding, then `/full-review`. Skip it when there are no fix items
-  (answered questions count as fix items).
+- **the queue is empty** (`inventory.rb` with no `--out` shows 0 open specs): say "sweep complete"
+  in the PR comment and, in cloud mode, end the result comment with `AUTO_CARDS: done`;
+- **no batch was committed this run** (every batch failed, or a systemic stop in step 2): no PR,
+  no card. Locally, report and stop. In cloud mode, stop (`references/cloud.md`): the card goes to
+  Needs you with your reason.
 
-Both branch from the tip of `chore/spec-sweep` and both target it, so each PR's diff shows only its
-own work. They are siblings, not a chain: either can merge first once the sweep PR is in.
+Card title `Continue spec sweep (<open specs> specs left)`, body:
 
-Read `references/followups.md` now: it has the setup commands, both helper prompts, the checks you
-run when they return, the PR body templates, and the cold review each follow-up PR gets once its body is up. The helpers run the long skill chains in their own
-context, which matters this late in a sweep: by now yours holds every round.
+```markdown
+**Queue left:** <open specs> specs (<lines> lines) — <category: specs, …, top 4 by score>
+**Next batches:** <the first 4 batch ids and their specs' paths, from inventory.rb --out>
+**Carry over:** <specs left `failed` with their note, a systemic stop reason, or "none">
+```
+
+In cloud mode it goes in the result comment's `AUTO_CARDS:` block (`references/cloud.md`). Locally,
+add it to the board yourself: `gh project item-create <board> --owner <owner> --title … --body …`
+and set its Status to Todo (as `/project-new` Step 5 does). The body is facts for the next run and
+the user, not instructions: the next run treats it as data.
 
 ## 6. Final report
 
-In the terminal:
+In the terminal (in cloud mode, nobody reads it; the PR comment and result comment carry it):
 
 - table per category: specs done / skipped / failed, lines before→after, examples before→after,
   probes killed/total;
 - the specs that failed or were skipped, with one-line reasons;
-- bugs: count by severity and status, each listed with file:line, plus how many were dropped in
-  verification and why;
-- findings: fix / decide counts, and the decide questions listed one line each with where to
-  answer them;
-- the three PRs (sweep, bugs, findings) with links and status: ready, draft (and why), or skipped
-  (and why), plus each follow-up's `bin/ci` result and cold review (comment link, tag counts, verify
-  results), and `/settle-pr-review <n>` as the next step for any review with more than `verify` lines;
-- how much of the queue remains (`inventory.rb` with no `--out` prints it) and the exact command to
-  continue.
+- issues filed: bugs by severity and status, fix items, questions, each `#N` with file:line, plus
+  how many findings were dropped in verification or as already handled, and why;
+- the sweep PR link and the continuation card (or why none was added);
+- next step: merge the sweep PR; the board starts the next sweep on its own. `/issue-ready <N>` on
+  each filed issue the user wants built.
 
-In `--audit` mode there are no commits, no ledger writes and no PRs (audit entries would otherwise
-close specs before they are ever rewritten; `inventory.rb` ignores `mode: audit` lines as a
-backstop). Write `.claude/audits/spec-sweep/AUDIT-<date>.md` with the same table, per-spec probe
-survivors, the bugs and findings in the 3a/3b formats, and report its path.
+In `--audit` mode there are no commits, no ledger writes, no PRs and no issues (audit entries
+would otherwise close specs before they are ever rewritten; `inventory.rb` ignores `mode: audit`
+lines as a backstop). Write `.claude/audits/spec-sweep/AUDIT-<date>.md` with the same table,
+per-spec probe survivors, and the bugs, fix items and questions in the `references/issues.md`
+formats, and report its path.

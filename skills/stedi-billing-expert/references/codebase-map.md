@@ -21,7 +21,7 @@ Complete inventory of the Stedi clearinghouse integration in this repo. Verify p
 
 **Eligibility/benefits**: `verify_eligibility_service.rb`, `auto_verify_eligibility_service.rb`, `apply_eligibility_benefits_service.rb` (provenance-aware guards), `determine_copay_service.rb`, `update_billing_fields_service.rb`
 
-**ERA/posting/reconciliation**: `process_era_service.rb`, `match_era_to_claims_service.rb`, `compute_era_reconciliation_service.rb`, `apply_era_reconciliation_service.rb` (advisory-locked approval engine), `link_era_reconciliation_service.rb`, `dismiss_era_reconciliation_service.rb`, `derive_era_adjustment_policy_changes_service.rb` (pure CARC-PR → policy accumulator calculator)
+**ERA/posting/reconciliation**: `era_processor.rb`, `era_claim_matcher.rb`, `compute_era_reconciliation_service.rb`, `apply_era_reconciliation_service.rb` (advisory-locked approval engine), `link_era_reconciliation_service.rb`, `dismiss_era_reconciliation_service.rb`, `derive_era_adjustment_policy_changes_service.rb` (pure CARC-PR → policy accumulator calculator)
 
 **Payers/reporting**: `generate_denial_report_service.rb`, `generate_aging_report_service.rb`, `generate_superbill_service.rb`
 

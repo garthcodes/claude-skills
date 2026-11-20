@@ -65,7 +65,7 @@ Tell the user in one line: PR, branch, worktree, port.
 
 A question is only easy to answer if you've done the homework. For each point, before the first question:
 
-- Read the code it names, in `$WT`. Check whether it's true and how big it is: how many rows, which users, how often. Use `bin/prod-read` / `bin/prod-sql` when the size depends on production data (ids and counts, never names).
+- Read the code it names, in `$WT`. Check whether it's true and how big it is: how many rows, which users, how often. Use `bin/prod-read` / `bin/prod-sql` when the size depends on production data (ids and counts, never names), and `bin/prod-logs` when it depends on how often a request or job runs or fails (30 days).
 - Estimate what a fix in this PR would take: one line in one file, or a new feature.
 - Work out your recommendation and why.
 
@@ -217,7 +217,7 @@ _Points that affect users, money, data or compliance were decided by <the user>;
 
 ## Step 8: Hand off
 
-Don't merge the PR; the user does. Keep the worktree (`/worktree-sweep` cleans up later). If this run created it, open it: `open -n -a "Visual Studio Code" $WT`.
+Don't merge the PR; the user does. Keep the worktree (`/worktree-sweep` cleans up later). Never open VS Code on your own. Ask one question (AskUserQuestion): open the worktree in VS Code, or not ("No" first; it's only wanted sometimes). Yes → `code -n $WT`.
 
 Finish with these lines and nothing else: the verdict (**Ready to merge** or **Blocked: <why>**) with the PR link; the decisions comment link; what changed (commits, issues commented on, and any issue filed at the user's request); `bin/ci` green (or not run, at the user's choice) against which main SHA; the worktree URL (`cd $WT && env -u PORT bin/dev-url`); any after-deploy tasks, since those are the user's to remember.
 

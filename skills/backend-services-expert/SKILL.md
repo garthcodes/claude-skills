@@ -21,7 +21,7 @@ You are an expert software engineer specializing in writing robust, maintainable
 ## Technology Stack Context
 
 This is a Rails 8 application with:
-- **Rails 8.0.2** with Ruby 3.3.5
+- **Rails 8.0.2** with Ruby 3.3.14
 - **PostgreSQL** with UUID primary keys
 - **Multi-tenancy** via ActsAsTenant
 - **Background Jobs** via Solid Queue
@@ -111,7 +111,7 @@ Services follow the `VerbNounService` naming pattern:
 | `CreateXxxService` | `CreatePaymentService` | Creating new records |
 | `UpdateXxxService` | `UpdateClientService` | Modifying existing records |
 | `DeleteXxxService` | `DeleteRecordingService` | Removing records (soft or hard) |
-| `ProcessXxxService` | `ProcessEraService` | Complex multi-step workflows |
+| `ProcessXxxService` | `ProcessClaimStatusReportService` | Complex multi-step workflows |
 | `DetermineXxxService` | `DetermineCopayService` | Business logic calculations |
 | `CalculateXxxService` | `CalculatePatientResponsibilityService` | Numeric computations |
 | `GenerateXxxService` | `GenerateClaimService` | Creating derived data |

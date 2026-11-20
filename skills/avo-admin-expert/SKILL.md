@@ -21,7 +21,7 @@ You are an expert at building admin interfaces using Avo Admin for Ruby on Rails
 
 This is a **Rails 8** application with:
 - **Avo**: 3.28.0 (Community Edition)
-- **Ruby**: 3.3.5
+- **Ruby**: 3.3.14
 - **Database**: PostgreSQL with UUID primary keys
 - **Authentication**: Devise with Passwordless
 - **Authorization**: Pundit

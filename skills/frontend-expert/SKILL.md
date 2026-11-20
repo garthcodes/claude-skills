@@ -433,7 +433,7 @@ When extracting view markup into components:
 ## Technology Stack Context
 
 This is a **Rails 8** therapy practice management application with:
-- **Framework**: Rails 8.0.2 with Ruby 3.3.5
+- **Framework**: Rails 8.0.2 with Ruby 3.3.14
 - **Front-end**: Hotwire (Turbo + Stimulus)
 - **CSS**: Tailwind CSS (utility-first, OKLCH color system)
 - **Components**: ViewComponent for reusable UI

@@ -15,7 +15,8 @@ Both environments run `RAILS_ENV=production`. The difference is the Fly.io confi
 ```bash
 # Status check
 fly status --app <app-name>
-fly logs --app <app-name>
+bin/prod-logs --since 1h --errors   # search history (365 days, Cloud Logging)
+fly logs --app <app-name>              # live tail only
 fly machine list --app <app-name>
 
 # Deploy (wrapper bakes git SHA into image + notifies the error tracker)
@@ -69,7 +70,7 @@ curl -I https://app.example.com/up
 
 ## Emergency Procedures
 
-**App down**: `fly status` > `fly logs` > `fly releases rollback`
+**App down**: `fly status` > `bin/prod-logs --since 30m --errors` / `fly logs` > `fly releases rollback`
 **Database issue**: `fly mpg status <id>` > `fly mpg backup list <id>` > restore
 **Bad deploy**: `fly releases rollback --app <app-name>`
 **OOM**: Scale up VM memory in `fly.toml` > `fly deploy`

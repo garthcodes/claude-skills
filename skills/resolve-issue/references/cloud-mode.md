@@ -1,6 +1,6 @@
 # Cloud mode (autofix runs)
 
-`/fix-honeybadger`, `/resolve-issue` and `/group-issues` run in **cloud mode** when their arguments carry `run=<id>`. The app's own autofix dispatcher starts them as Claude Code cloud routines, in a dedicated cloud environment: a fresh Linux VM with the repo checked out, set up by the app's setup script. Nobody watches the session. Everything the skill's own "auto mode" says still applies; this file adds what is different in the cloud, and wins where the two disagree.
+`/fix-honeybadger`, `/resolve-issue` and `/group-issues` (and `/spec-sweep`, through its own `references/cloud.md`) run in **cloud mode** when their arguments carry `run=<id>`. The app's own autofix dispatcher starts them as Claude Code cloud routines, in a dedicated cloud environment: a fresh Linux VM with the repo checked out, set up by the app's setup script. Nobody watches the session. Everything the skill's own "auto mode" says still applies; this file adds what is different in the cloud, and wins where the two disagree.
 
 **Not shipped in this repo:** the dispatcher, the cloud setup and session-start scripts, `bin/hb-api` (a read-only Honeybadger wrapper) and `bin/gh-rest` (a REST wrapper locked to one repo that can only open draft PRs from run branches and edit only its own `AUTO_PHASE` comments). They live in the application; this file describes how the skills use them.
 

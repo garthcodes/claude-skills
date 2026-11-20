@@ -63,6 +63,7 @@ with `Edit` (never re-print the whole file). Required structure:
 ## Identity
 - FEATURE_NAME: <slug>
 - BRANCH: feature/<slug>
+- BASE_BRANCH: <branch MAIN_DIR was on at launch — main, or an integration branch like crm; the rebase target and PR base>
 - WORKTREE_PATH: <absolute path>
 - MAIN_DIR: <absolute path>
 - PRIMARY_DIR: <absolute path>

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Worktrees for /spec-sweep.
 #
-#   worktrees.sh setup <workers>   integration worktree on branch chore/spec-sweep (created from main
-#                                  if missing) + worker worktrees w1..wN reset (detached) to its tip
+#   worktrees.sh setup <workers>   integration worktree on $SWEEP_BRANCH (default chore/spec-sweep, created from $SWEEP_BASE,
+#                                  default main, if missing) + worker worktrees w1..wN reset (detached) to its tip
 #   worktrees.sh status            branch tips, dirty state
 #   worktrees.sh teardown          remove worker worktrees (keeps the integration worktree + branch)
 #
@@ -14,7 +14,8 @@ set -euo pipefail
 MAIN_ROOT="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
 BASE="$MAIN_ROOT/.claude/worktrees"
 INTEG="$BASE/spec-sweep"
-BRANCH="chore/spec-sweep"
+BRANCH="${SWEEP_BRANCH:-chore/spec-sweep}"
+BASE_REF="${SWEEP_BASE:-main}"   # cloud: autofix/run-<id> from origin/main
 
 cmd="${1:-status}"
 
@@ -26,7 +27,7 @@ case "$cmd" in
       if git -C "$MAIN_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
         git -C "$MAIN_ROOT" worktree add -q "$INTEG" "$BRANCH"
       else
-        git -C "$MAIN_ROOT" worktree add -q -b "$BRANCH" "$INTEG" main
+        git -C "$MAIN_ROOT" worktree add -q -b "$BRANCH" "$INTEG" "$BASE_REF"
       fi
     fi
     # Answers the user typed into a findings file are expected; step 0.4 commits them.
